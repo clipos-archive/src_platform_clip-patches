@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Thu, 1 Jan 2009 00:00:00 +0200
+Subject: [PATCH 15/32] clip: grsec/x86: Disable randomize_va_space sysctl if
+ PAX_ASLR is set
+
+Disable randomize_va_space when PAX_ASLR is on
+
+Original version used to set randomize_va_disable to 1. Now set to 2.
+
+Patch: 1515_randomize_va_disable.patch
+---
+ arch/x86/kernel/cpu/transmeta.c | 2 ++
+ include/linux/mm.h              | 4 ++++
+ kernel/sysctl.c                 | 2 +-
+ mm/memory.c                     | 2 ++
+ 4 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/arch/x86/kernel/cpu/transmeta.c b/arch/x86/kernel/cpu/transmeta.c
+index 34178564be2a7..c32211ac975a8 100644
+--- a/arch/x86/kernel/cpu/transmeta.c
++++ b/arch/x86/kernel/cpu/transmeta.c
+@@ -89,12 +89,14 @@ static void init_transmeta(struct cpuinfo_x86 *c)
+ 	set_cpu_cap(c, X86_FEATURE_CONSTANT_TSC);
+ 
+ #ifdef CONFIG_SYSCTL
++#ifndef CONFIG_PAX_ASLR
+ 	/*
+ 	 * randomize_va_space slows us down enormously;
+ 	 * it probably triggers retranslation of x86->native bytecode
+ 	 */
+ 	randomize_va_space = 0;
+ #endif
++#endif
+ }
+ 
+ static const struct cpu_dev transmeta_cpu_dev = {
+diff --git a/include/linux/mm.h b/include/linux/mm.h
+index c8e5faffc8b0c..0c5795939233e 100644
+--- a/include/linux/mm.h
++++ b/include/linux/mm.h
+@@ -2333,8 +2333,12 @@ void drop_slab_node(int nid);
+ #ifndef CONFIG_MMU
+ #define randomize_va_space 0
+ #else
++#ifdef CONFIG_PAX_ASLR
++#define randomize_va_space 2
++#else
+ extern int randomize_va_space;
+ #endif
++#endif
+ 
+ const char * arch_vma_name(struct vm_area_struct *vma);
+ void print_vma_addr(char *prefix, unsigned long rip);
+diff --git a/kernel/sysctl.c b/kernel/sysctl.c
+index 2c6845b415f0d..90f595c8c9355 100644
+--- a/kernel/sysctl.c
++++ b/kernel/sysctl.c
+@@ -1058,7 +1058,7 @@ static struct ctl_table kern_table[] = {
+ 	},
+ #endif
+ #endif
+-#if defined(CONFIG_MMU)
++#if defined(CONFIG_MMU) && !defined(CONFIG_PAX_ASLR)
+ 	{
+ 		.procname	= "randomize_va_space",
+ 		.data		= &randomize_va_space,
+diff --git a/mm/memory.c b/mm/memory.c
+index c0c6e9d83dce4..2237ccaba4116 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -105,6 +105,7 @@ EXPORT_SYMBOL(high_memory);
+  * ( When CONFIG_COMPAT_BRK=y we exclude brk from randomization,
+  *   as ancient (libc5 based) binaries can segfault. )
+  */
++#ifndef CONFIG_PAX_ASLR
+ int randomize_va_space __read_mostly =
+ #ifdef CONFIG_COMPAT_BRK
+ 					1;
+@@ -118,6 +119,7 @@ static int __init disable_randmaps(char *s)
+ 	return 1;
+ }
+ __setup("norandmaps", disable_randmaps);
++#endif
+ 
+ unsigned long zero_pfn __read_mostly;
+ unsigned long highest_memmap_pfn __read_mostly;
+-- 
+2.17.0
+

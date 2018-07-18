@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Mon, 1 Jan 2007 00:00:00 +0200
+Subject: [PATCH 13/32] clip: vserver: Do not show /proc/<tgid>/{v,n}info if
+ VXF_HIDE_VINFO is set
+
+Do not show /proc/<tgid>/{v,n}info when the VXF_HIDE_VINFO flag is set,
+rather than showing them as empty.
+
+Hide vinfo et ninfo when printing /proc/<pid> information
+
+Patch: 1513_vserver_hide_proc_vinfo.patch
+---
+ fs/proc/base.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/fs/proc/base.c b/fs/proc/base.c
+index e45fdc006fb00..6c2cf20f85e67 100644
+--- a/fs/proc/base.c
++++ b/fs/proc/base.c
+@@ -2630,6 +2630,13 @@ static int proc_pident_readdir(struct file *file, struct dir_context *ctx,
+ 		goto out;
+ 
+ 	for (p = ents + (ctx->pos - 2); p <= ents + nents - 1; p++) {
++		if (task_vx_flags(task, VXF_HIDE_VINFO, 0) &&
++				(p->len == 5) &&
++				(!memcmp(p->name, "vinfo", 5) ||
++				!memcmp(p->name, "ninfo", 5))) {
++			continue;
++		}
++
+ 		if (!proc_fill_cache(file, ctx, p->name, p->len,
+ 				proc_pident_instantiate, task, p))
+ 			break;
+-- 
+2.17.0
+

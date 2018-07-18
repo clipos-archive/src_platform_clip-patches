@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Wed, 19 Jan 2011 13:23:58 +0100
+Subject: [PATCH 17/32] clip: vserver: Keep /dev/pts/ptmx visible in non-ADMIN
+ contexts
+
+Allow opening of /dev/ptmx in all jails reagardless of its vxid tag
+
+Add an exception in vserver's devpts xid tagging, so that /dev/pts/ptmx
+remains visible in non-ADMIN contexts.
+
+Patch: 1517_vserver_devpts_ptmx_visibility.patch
+---
+ fs/devpts/inode.c | 13 ++++++++++---
+ fs/namei.c        |  4 ++++
+ 2 files changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/fs/devpts/inode.c b/fs/devpts/inode.c
+index b998a236c0612..97cf1aa33c674 100644
+--- a/fs/devpts/inode.c
++++ b/fs/devpts/inode.c
+@@ -44,7 +44,8 @@ static int devpts_permission(struct inode *inode, int mask)
+ 	int ret = -EACCES;
+ 
+ 	/* devpts is xid tagged */
+-	if (vx_check((vxid_t)i_tag_read(inode), VS_WATCH_P | VS_IDENT))
++	if ((inode->i_rdev == MKDEV(TTYAUX_MAJOR, PTMX_MINOR)) ||
++			(vx_check((vxid_t)i_tag_read(inode), VS_WATCH_P | VS_IDENT)))
+ 		ret = generic_permission(inode, mask);
+ 	return ret;
+ }
+@@ -384,12 +385,18 @@ static int devpts_filter(struct dentry *de)
+ 	vxid_t xid = 0;
+ 
+ 	/* devpts is xid tagged */
+-	if (de && de->d_inode)
++	if (de && de->d_inode) {
++		if (de->d_inode->i_rdev == MKDEV(TTYAUX_MAJOR, PTMX_MINOR))
++			return 1;
++
+ 		xid = (vxid_t)i_tag_read(de->d_inode);
++	}
+ #ifdef CONFIG_VSERVER_WARN_DEVPTS
+-	else
++	else if (de)
+ 		vxwprintk_task(1, "devpts " VS_Q("%.*s") " without inode.",
+ 			       de->d_name.len, de->d_name.name);
++	else
++		vxwprintk_task(1, "devpts: de: NULL.");
+ #endif
+ 	return vx_check(xid, VS_WATCH_P | VS_IDENT);
+ }
+diff --git a/fs/namei.c b/fs/namei.c
+index 508d5f3699339..ed8c3fe69ce68 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -48,6 +48,9 @@
+ #include <linux/pid_namespace.h>
+ #include <asm/uaccess.h>
+ 
++#include <linux/major.h>
++#define PTMX_MINOR	2
++
+ #include "internal.h"
+ #include "proc/internal.h"
+ #include "mount.h"
+@@ -312,6 +315,7 @@ static int __dx_permission(const struct inode *inode, int mask)
+ 	if (inode->i_sb->s_magic == DEVPTS_SUPER_MAGIC) {
+ 		/* devpts is xid tagged */
+ 		if (S_ISDIR(inode->i_mode) ||
++		    (inode->i_rdev == MKDEV(TTYAUX_MAJOR, PTMX_MINOR)) ||
+ 		    vx_check((vxid_t)i_tag_read(inode), VS_IDENT | VS_WATCH_P))
+ 			return 0;
+ 
+-- 
+2.17.0
+

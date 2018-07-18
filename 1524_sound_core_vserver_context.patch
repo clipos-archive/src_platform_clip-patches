@@ -1,0 +1,735 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Mon, 5 Aug 2013 10:49:25 +0200
+Subject: [PATCH 24/32] clip: sound: Filter sound device syscalls using xid
+
+Add filtering on all sound device syscalls (except close()) to only
+allow them in either the ADMIN vserver context or a context whose xid
+matches the value of the 'kernel.clip.sound_xid' sysctl.
+
+Patch: 1524_sound_core_vserver_context.patch
+---
+ include/sound/core.h        |  3 ++
+ sound/core/control.c        | 15 ++++++++
+ sound/core/control_compat.c |  3 ++
+ sound/core/hwdep.c          | 27 +++++++++++++
+ sound/core/hwdep_compat.c   |  4 ++
+ sound/core/info.c           | 21 ++++++++++
+ sound/core/pcm.c            |  4 ++
+ sound/core/pcm_compat.c     |  3 ++
+ sound/core/pcm_lib.c        | 17 ++++++++
+ sound/core/pcm_native.c     | 44 ++++++++++++++++++++-
+ sound/core/rawmidi.c        | 15 ++++++++
+ sound/core/rawmidi_compat.c |  3 ++
+ sound/core/sound.c          | 77 +++++++++++++++++++++++++++++++++++++
+ sound/core/timer.c          | 15 ++++++++
+ sound/core/timer_compat.c   |  3 ++
+ 15 files changed, 252 insertions(+), 2 deletions(-)
+
+diff --git a/include/sound/core.h b/include/sound/core.h
+index 31079ea5e4846..2ab4fe7d8ad33 100644
+--- a/include/sound/core.h
++++ b/include/sound/core.h
+@@ -457,4 +457,7 @@ snd_pci_quirk_lookup_id(u16 vendor, u16 device,
+ }
+ #endif
+ 
++extern vxid_t clip_sound_xid;
++extern int snd_allowed_ctx(void);
++
+ #endif /* __SOUND_CORE_H */
+diff --git a/sound/core/control.c b/sound/core/control.c
+index 995cde48c1bed..18ecf0582b283 100644
+--- a/sound/core/control.c
++++ b/sound/core/control.c
+@@ -52,6 +52,9 @@ static int snd_ctl_open(struct inode *inode, struct file *file)
+ 	struct snd_ctl_file *ctl;
+ 	int i, err;
+ 
++	if (!snd_allowed_ctx())
++		return -ENXIO;
++
+ 	err = nonseekable_open(inode, file);
+ 	if (err < 0)
+ 		return err;
+@@ -1500,6 +1503,9 @@ static long snd_ctl_ioctl(struct file *file, unsigned int cmd, unsigned long arg
+ 	int __user *ip = argp;
+ 	int err;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	ctl = file->private_data;
+ 	card = ctl->card;
+ 	if (snd_BUG_ON(!card))
+@@ -1564,6 +1570,9 @@ static ssize_t snd_ctl_read(struct file *file, char __user *buffer,
+ 	int err = 0;
+ 	ssize_t result = 0;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	ctl = file->private_data;
+ 	if (snd_BUG_ON(!ctl || !ctl->card))
+ 		return -ENXIO;
+@@ -1620,6 +1629,9 @@ static unsigned int snd_ctl_poll(struct file *file, poll_table * wait)
+ 	unsigned int mask;
+ 	struct snd_ctl_file *ctl;
+ 
++	if (!snd_allowed_ctx())
++		return 0;
++
+ 	ctl = file->private_data;
+ 	if (!ctl->subscribed)
+ 		return 0;
+@@ -1726,6 +1738,9 @@ static int snd_ctl_fasync(int fd, struct file * file, int on)
+ {
+ 	struct snd_ctl_file *ctl;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	ctl = file->private_data;
+ 	return fasync_helper(fd, file, on, &ctl->fasync);
+ }
+diff --git a/sound/core/control_compat.c b/sound/core/control_compat.c
+index 1fa70766ffabe..77110c217e582 100644
+--- a/sound/core/control_compat.c
++++ b/sound/core/control_compat.c
+@@ -454,6 +454,9 @@ static inline long snd_ctl_ioctl_compat(struct file *file, unsigned int cmd, uns
+ 	void __user *argp = compat_ptr(arg);
+ 	int err;
+ 
++	if (!snd_allowed_ctx())
++		return -ENXIO;
++
+ 	ctl = file->private_data;
+ 	if (snd_BUG_ON(!ctl || !ctl->card))
+ 		return -ENXIO;
+diff --git a/sound/core/hwdep.c b/sound/core/hwdep.c
+index 36d2416f90d99..f80199ac2b351 100644
+--- a/sound/core/hwdep.c
++++ b/sound/core/hwdep.c
+@@ -56,6 +56,10 @@ static struct snd_hwdep *snd_hwdep_search(struct snd_card *card, int device)
+ static loff_t snd_hwdep_llseek(struct file * file, loff_t offset, int orig)
+ {
+ 	struct snd_hwdep *hw = file->private_data;
++
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	if (hw->ops.llseek)
+ 		return hw->ops.llseek(hw, file, offset, orig);
+ 	return -ENXIO;
+@@ -65,6 +69,10 @@ static ssize_t snd_hwdep_read(struct file * file, char __user *buf,
+ 			      size_t count, loff_t *offset)
+ {
+ 	struct snd_hwdep *hw = file->private_data;
++
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	if (hw->ops.read)
+ 		return hw->ops.read(hw, buf, count, offset);
+ 	return -ENXIO;	
+@@ -74,6 +82,10 @@ static ssize_t snd_hwdep_write(struct file * file, const char __user *buf,
+ 			       size_t count, loff_t *offset)
+ {
+ 	struct snd_hwdep *hw = file->private_data;
++
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	if (hw->ops.write)
+ 		return hw->ops.write(hw, buf, count, offset);
+ 	return -ENXIO;	
+@@ -86,6 +98,9 @@ static int snd_hwdep_open(struct inode *inode, struct file * file)
+ 	int err;
+ 	wait_queue_t wait;
+ 
++	if (!snd_allowed_ctx())
++		return -ENODEV;
++
+ 	if (major == snd_major) {
+ 		hw = snd_lookup_minor_data(iminor(inode),
+ 					   SNDRV_DEVICE_TYPE_HWDEP);
+@@ -179,6 +194,10 @@ static int snd_hwdep_release(struct inode *inode, struct file * file)
+ static unsigned int snd_hwdep_poll(struct file * file, poll_table * wait)
+ {
+ 	struct snd_hwdep *hw = file->private_data;
++
++	if (!snd_allowed_ctx())
++		return 0;
++
+ 	if (hw->ops.poll)
+ 		return hw->ops.poll(hw, file, wait);
+ 	return 0;
+@@ -244,6 +263,10 @@ static long snd_hwdep_ioctl(struct file * file, unsigned int cmd,
+ {
+ 	struct snd_hwdep *hw = file->private_data;
+ 	void __user *argp = (void __user *)arg;
++
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	switch (cmd) {
+ 	case SNDRV_HWDEP_IOCTL_PVERSION:
+ 		return put_user(SNDRV_HWDEP_VERSION, (int __user *)argp);
+@@ -262,6 +285,10 @@ static long snd_hwdep_ioctl(struct file * file, unsigned int cmd,
+ static int snd_hwdep_mmap(struct file * file, struct vm_area_struct * vma)
+ {
+ 	struct snd_hwdep *hw = file->private_data;
++
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	if (hw->ops.mmap)
+ 		return hw->ops.mmap(hw, file, vma);
+ 	return -ENXIO;
+diff --git a/sound/core/hwdep_compat.c b/sound/core/hwdep_compat.c
+index 3827c0ceec8ff..0cc515ef54d9a 100644
+--- a/sound/core/hwdep_compat.c
++++ b/sound/core/hwdep_compat.c
+@@ -64,6 +64,10 @@ static long snd_hwdep_ioctl_compat(struct file * file, unsigned int cmd,
+ {
+ 	struct snd_hwdep *hw = file->private_data;
+ 	void __user *argp = compat_ptr(arg);
++
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	switch (cmd) {
+ 	case SNDRV_HWDEP_IOCTL_PVERSION:
+ 	case SNDRV_HWDEP_IOCTL_INFO:
+diff --git a/sound/core/info.c b/sound/core/info.c
+index 8ab72e0f59329..8103a2e2bce3d 100644
+--- a/sound/core/info.c
++++ b/sound/core/info.c
+@@ -123,6 +123,9 @@ static loff_t snd_info_entry_llseek(struct file *file, loff_t offset, int orig)
+ 	struct snd_info_entry *entry;
+ 	loff_t ret = -EINVAL, size;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	data = file->private_data;
+ 	entry = data->entry;
+ 	mutex_lock(&entry->access);
+@@ -167,6 +170,9 @@ static ssize_t snd_info_entry_read(struct file *file, char __user *buffer,
+ 	size_t size;
+ 	loff_t pos;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	pos = *offset;
+ 	if (!valid_pos(pos, count))
+ 		return -EIO;
+@@ -189,6 +195,9 @@ static ssize_t snd_info_entry_write(struct file *file, const char __user *buffer
+ 	ssize_t size = 0;
+ 	loff_t pos;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	pos = *offset;
+ 	if (!valid_pos(pos, count))
+ 		return -EIO;
+@@ -209,6 +218,9 @@ static unsigned int snd_info_entry_poll(struct file *file, poll_table *wait)
+ 	struct snd_info_entry *entry = data->entry;
+ 	unsigned int mask = 0;
+ 
++	if (!snd_allowed_ctx())
++		return 0;
++
+ 	if (entry->c.ops->poll)
+ 		return entry->c.ops->poll(entry,
+ 					  data->file_private_data,
+@@ -226,6 +238,9 @@ static long snd_info_entry_ioctl(struct file *file, unsigned int cmd,
+ 	struct snd_info_private_data *data = file->private_data;
+ 	struct snd_info_entry *entry = data->entry;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	if (!entry->c.ops->ioctl)
+ 		return -ENOTTY;
+ 	return entry->c.ops->ioctl(entry, data->file_private_data,
+@@ -238,6 +253,9 @@ static int snd_info_entry_mmap(struct file *file, struct vm_area_struct *vma)
+ 	struct snd_info_private_data *data;
+ 	struct snd_info_entry *entry;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	data = file->private_data;
+ 	if (data == NULL)
+ 		return 0;
+@@ -254,6 +272,9 @@ static int snd_info_entry_open(struct inode *inode, struct file *file)
+ 	struct snd_info_private_data *data;
+ 	int mode, err;
+ 
++	if (!snd_allowed_ctx())
++		return -ENODEV;
++
+ 	mutex_lock(&info_mutex);
+ 	err = alloc_info_private(entry, &data);
+ 	if (err < 0)
+diff --git a/sound/core/pcm.c b/sound/core/pcm.c
+index 074363b63cc4e..5b3acdf3c983a 100644
+--- a/sound/core/pcm.c
++++ b/sound/core/pcm.c
+@@ -93,6 +93,10 @@ static int snd_pcm_control_ioctl(struct snd_card *card,
+ 				 struct snd_ctl_file *control,
+ 				 unsigned int cmd, unsigned long arg)
+ {
++
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	switch (cmd) {
+ 	case SNDRV_CTL_IOCTL_PCM_NEXT_DEVICE:
+ 		{
+diff --git a/sound/core/pcm_compat.c b/sound/core/pcm_compat.c
+index 26a72337fd6aa..e9d1a33f24365 100644
+--- a/sound/core/pcm_compat.c
++++ b/sound/core/pcm_compat.c
+@@ -661,6 +661,9 @@ static long snd_pcm_ioctl_compat(struct file *file, unsigned int cmd, unsigned l
+ 	struct snd_pcm_substream *substream;
+ 	void __user *argp = compat_ptr(arg);
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	pcm_file = file->private_data;
+ 	if (! pcm_file)
+ 		return -ENOTTY;
+diff --git a/sound/core/pcm_lib.c b/sound/core/pcm_lib.c
+index 57dfd232980cb..9885bb45f2de8 100644
+--- a/sound/core/pcm_lib.c
++++ b/sound/core/pcm_lib.c
+@@ -1932,6 +1932,11 @@ static int wait_for_avail(struct snd_pcm_substream *substream,
+ 			break;
+ 		}
+ 
++		if (!snd_allowed_ctx()) {
++			err = -EBADFD;
++			break;
++		}
++
+ 		/*
+ 		 * We need to check if space became available already
+ 		 * (and thus the wakeup happened already) first to close
+@@ -2026,6 +2031,12 @@ static snd_pcm_sframes_t snd_pcm_lib_write1(struct snd_pcm_substream *substream,
+ 		return 0;
+ 
+ 	snd_pcm_stream_lock_irq(substream);
++
++	if (!snd_allowed_ctx()) {
++		err = -EBADFD;
++		goto _end_unlock;
++	}
++
+ 	switch (runtime->status->state) {
+ 	case SNDRV_PCM_STATE_PREPARED:
+ 	case SNDRV_PCM_STATE_RUNNING:
+@@ -2244,6 +2255,12 @@ static snd_pcm_sframes_t snd_pcm_lib_read1(struct snd_pcm_substream *substream,
+ 		return 0;
+ 
+ 	snd_pcm_stream_lock_irq(substream);
++
++	if (!snd_allowed_ctx()) {
++		err = -EBADFD;
++		goto _end_unlock;
++	}
++
+ 	switch (runtime->status->state) {
+ 	case SNDRV_PCM_STATE_PREPARED:
+ 		if (size >= runtime->start_threshold) {
+diff --git a/sound/core/pcm_native.c b/sound/core/pcm_native.c
+index 23b36d1c60a4a..eada07121ebac 100644
+--- a/sound/core/pcm_native.c
++++ b/sound/core/pcm_native.c
+@@ -2324,7 +2324,12 @@ static int snd_pcm_open_file(struct file *file,
+ static int snd_pcm_playback_open(struct inode *inode, struct file *file)
+ {
+ 	struct snd_pcm *pcm;
+-	int err = nonseekable_open(inode, file);
++	int err;
++
++	if (!snd_allowed_ctx())
++		return -ENODEV;
++
++	err = nonseekable_open(inode, file);
+ 	if (err < 0)
+ 		return err;
+ 	pcm = snd_lookup_minor_data(iminor(inode),
+@@ -2338,7 +2343,12 @@ static int snd_pcm_playback_open(struct inode *inode, struct file *file)
+ static int snd_pcm_capture_open(struct inode *inode, struct file *file)
+ {
+ 	struct snd_pcm *pcm;
+-	int err = nonseekable_open(inode, file);
++	int err;
++
++	if (!snd_allowed_ctx())
++		return -ENODEV;
++
++	err = nonseekable_open(inode, file);
+ 	if (err < 0)
+ 		return err;
+ 	pcm = snd_lookup_minor_data(iminor(inode),
+@@ -2983,6 +2993,9 @@ static long snd_pcm_playback_ioctl(struct file *file, unsigned int cmd,
+ {
+ 	struct snd_pcm_file *pcm_file;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	pcm_file = file->private_data;
+ 
+ 	if (((cmd >> 8) & 0xff) != 'A')
+@@ -2997,6 +3010,9 @@ static long snd_pcm_capture_ioctl(struct file *file, unsigned int cmd,
+ {
+ 	struct snd_pcm_file *pcm_file;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	pcm_file = file->private_data;
+ 
+ 	if (((cmd >> 8) & 0xff) != 'A')
+@@ -3040,6 +3056,9 @@ static ssize_t snd_pcm_read(struct file *file, char __user *buf, size_t count,
+ 	struct snd_pcm_runtime *runtime;
+ 	snd_pcm_sframes_t result;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	pcm_file = file->private_data;
+ 	substream = pcm_file->substream;
+ 	if (PCM_RUNTIME_CHECK(substream))
+@@ -3064,6 +3083,9 @@ static ssize_t snd_pcm_write(struct file *file, const char __user *buf,
+ 	struct snd_pcm_runtime *runtime;
+ 	snd_pcm_sframes_t result;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	pcm_file = file->private_data;
+ 	substream = pcm_file->substream;
+ 	if (PCM_RUNTIME_CHECK(substream))
+@@ -3090,6 +3112,9 @@ static ssize_t snd_pcm_readv(struct kiocb *iocb, struct iov_iter *to)
+ 	void __user **bufs;
+ 	snd_pcm_uframes_t frames;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	pcm_file = iocb->ki_filp->private_data;
+ 	substream = pcm_file->substream;
+ 	if (PCM_RUNTIME_CHECK(substream))
+@@ -3126,6 +3151,9 @@ static ssize_t snd_pcm_writev(struct kiocb *iocb, struct iov_iter *from)
+ 	void __user **bufs;
+ 	snd_pcm_uframes_t frames;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	pcm_file = iocb->ki_filp->private_data;
+ 	substream = pcm_file->substream;
+ 	if (PCM_RUNTIME_CHECK(substream))
+@@ -3159,6 +3187,9 @@ static unsigned int snd_pcm_playback_poll(struct file *file, poll_table * wait)
+         unsigned int mask;
+ 	snd_pcm_uframes_t avail;
+ 
++	if (!snd_allowed_ctx())
++		return 0;
++
+ 	pcm_file = file->private_data;
+ 
+ 	substream = pcm_file->substream;
+@@ -3198,6 +3229,9 @@ static unsigned int snd_pcm_capture_poll(struct file *file, poll_table * wait)
+         unsigned int mask;
+ 	snd_pcm_uframes_t avail;
+ 
++	if (!snd_allowed_ctx())
++		return 0;
++
+ 	pcm_file = file->private_data;
+ 
+ 	substream = pcm_file->substream;
+@@ -3497,6 +3531,9 @@ static int snd_pcm_mmap(struct file *file, struct vm_area_struct *area)
+ 	struct snd_pcm_substream *substream;	
+ 	unsigned long offset;
+ 	
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	pcm_file = file->private_data;
+ 	substream = pcm_file->substream;
+ 	if (PCM_RUNTIME_CHECK(substream))
+@@ -3524,6 +3561,9 @@ static int snd_pcm_fasync(int fd, struct file * file, int on)
+ 	struct snd_pcm_substream *substream;
+ 	struct snd_pcm_runtime *runtime;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	pcm_file = file->private_data;
+ 	substream = pcm_file->substream;
+ 	if (PCM_RUNTIME_CHECK(substream))
+diff --git a/sound/core/rawmidi.c b/sound/core/rawmidi.c
+index 86ae19d321cae..0f1c911560512 100644
+--- a/sound/core/rawmidi.c
++++ b/sound/core/rawmidi.c
+@@ -370,6 +370,9 @@ static int snd_rawmidi_open(struct inode *inode, struct file *file)
+ 	struct snd_rawmidi_file *rawmidi_file = NULL;
+ 	wait_queue_t wait;
+ 
++	if (!snd_allowed_ctx())
++		return -ENODEV;
++
+ 	if ((file->f_flags & O_APPEND) && !(file->f_flags & O_NONBLOCK)) 
+ 		return -EINVAL;		/* invalid combination */
+ 
+@@ -721,6 +724,9 @@ static long snd_rawmidi_ioctl(struct file *file, unsigned int cmd, unsigned long
+ 	struct snd_rawmidi_file *rfile;
+ 	void __user *argp = (void __user *)arg;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	rfile = file->private_data;
+ 	if (((cmd >> 8) & 0xff) != 'W')
+ 		return -ENOTTY;
+@@ -1002,6 +1008,9 @@ static ssize_t snd_rawmidi_read(struct file *file, char __user *buf, size_t coun
+ 	struct snd_rawmidi_substream *substream;
+ 	struct snd_rawmidi_runtime *runtime;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	rfile = file->private_data;
+ 	substream = rfile->input;
+ 	if (substream == NULL)
+@@ -1306,6 +1315,9 @@ static ssize_t snd_rawmidi_write(struct file *file, const char __user *buf,
+ 	struct snd_rawmidi_runtime *runtime;
+ 	struct snd_rawmidi_substream *substream;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	rfile = file->private_data;
+ 	substream = rfile->output;
+ 	runtime = substream->runtime;
+@@ -1373,6 +1385,9 @@ static unsigned int snd_rawmidi_poll(struct file *file, poll_table * wait)
+ 	struct snd_rawmidi_runtime *runtime;
+ 	unsigned int mask;
+ 
++	if (!snd_allowed_ctx())
++		return 0;
++
+ 	rfile = file->private_data;
+ 	if (rfile->input != NULL) {
+ 		runtime = rfile->input->runtime;
+diff --git a/sound/core/rawmidi_compat.c b/sound/core/rawmidi_compat.c
+index f69764d7cdd70..1c6626f275ffd 100644
+--- a/sound/core/rawmidi_compat.c
++++ b/sound/core/rawmidi_compat.c
+@@ -152,6 +152,9 @@ static long snd_rawmidi_ioctl_compat(struct file *file, unsigned int cmd, unsign
+ 	struct snd_rawmidi_file *rfile;
+ 	void __user *argp = compat_ptr(arg);
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	rfile = file->private_data;
+ 	switch (cmd) {
+ 	case SNDRV_RAWMIDI_IOCTL_PVERSION:
+diff --git a/sound/core/sound.c b/sound/core/sound.c
+index 3518d311344c7..25c0f5f32e088 100644
+--- a/sound/core/sound.c
++++ b/sound/core/sound.c
+@@ -31,6 +31,8 @@
+ #include <sound/initval.h>
+ #include <linux/kmod.h>
+ #include <linux/mutex.h>
++#include <linux/sysctl.h>
++#include <linux/vserver/base.h>
+ 
+ static int major = CONFIG_SND_MAJOR;
+ int snd_major;
+@@ -156,6 +158,9 @@ static int snd_open(struct inode *inode, struct file *file)
+ 	const struct file_operations *new_fops;
+ 	int err = 0;
+ 
++	if (!snd_allowed_ctx())
++		return -ENODEV;
++
+ 	if (minor >= ARRAY_SIZE(snd_minors))
+ 		return -ENODEV;
+ 	mutex_lock(&sound_mutex);
+@@ -393,6 +398,71 @@ int __init snd_minor_info_init(void)
+ }
+ #endif /* CONFIG_SND_PROC_FS */
+ 
++/*
++ *  SYSCTL PART (CLIP)
++ */
++vxid_t clip_sound_xid = 0;
++
++static struct ctl_table_header *snd_xid_table_header = NULL;
++
++static struct ctl_table snd_xid_inner_table[] = {
++	{
++		.procname	= "sound_xid",
++		.data		= &clip_sound_xid,
++		.maxlen		= sizeof(clip_sound_xid),
++		.mode		= 0600,
++		.proc_handler	= &proc_dointvec,
++	},
++
++	{ }
++};
++
++static struct ctl_table clip_dir_table[] = {
++	{
++		.procname 	= "clip",
++		.mode 		= 0700,
++		.child		= snd_xid_inner_table,
++	},
++	{ }
++};
++
++static struct ctl_table kernel_root_table[] = {
++	{
++		.procname	= "kernel",
++		.mode		= 0555,
++		.child		= clip_dir_table,
++	},
++	{ }
++};
++
++static int __init alsa_sysctl_init(void)
++{
++	snd_xid_table_header = register_sysctl_table(kernel_root_table);
++	if (!snd_xid_table_header) {
++		snd_printk(KERN_ERR "unable to register sysctl\n");
++		return -EFAULT;
++	}
++	return 0;
++}
++
++static void __exit alsa_sysctl_exit(void)
++{
++	if (snd_xid_table_header)
++		unregister_sysctl_table(snd_xid_table_header);
++}
++
++int snd_allowed_ctx(void)
++{
++	vxid_t cur = vx_current_xid();
++
++	if (!cur) /* Always allowed in ADMIN context */
++		return 1;
++	if (cur == clip_sound_xid)
++		return 1;
++	return 0;
++}
++EXPORT_SYMBOL(snd_allowed_ctx);
++
+ /*
+  *  INIT PART
+  */
+@@ -409,6 +479,12 @@ static int __init alsa_sound_init(void)
+ 		unregister_chrdev(major, "alsa");
+ 		return -ENOMEM;
+ 	}
++	if (alsa_sysctl_init() < 0) {
++	        // Tear down snd_info_init() setup. See alsa_sound_exit().
++		snd_info_done();
++		unregister_chrdev(major, "alsa");
++		return -EFAULT;
++	}
+ #ifndef MODULE
+ 	pr_info("Advanced Linux Sound Architecture Driver Initialized.\n");
+ #endif
+@@ -419,6 +495,7 @@ static void __exit alsa_sound_exit(void)
+ {
+ 	snd_info_done();
+ 	unregister_chrdev(major, "alsa");
++	alsa_sysctl_exit();
+ }
+ 
+ subsys_initcall(alsa_sound_init);
+diff --git a/sound/core/timer.c b/sound/core/timer.c
+index e5ddc475dca4a..92f886b2a27c2 100644
+--- a/sound/core/timer.c
++++ b/sound/core/timer.c
+@@ -1331,6 +1331,9 @@ static int snd_timer_user_open(struct inode *inode, struct file *file)
+ 	struct snd_timer_user *tu;
+ 	int err;
+ 
++	if (!snd_allowed_ctx())
++		return -ENODEV;
++
+ 	err = nonseekable_open(inode, file);
+ 	if (err < 0)
+ 		return err;
+@@ -1887,6 +1890,9 @@ static long __snd_timer_user_ioctl(struct file *file, unsigned int cmd,
+ 	void __user *argp = (void __user *)arg;
+ 	int __user *p = argp;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	tu = file->private_data;
+ 	switch (cmd) {
+ 	case SNDRV_TIMER_IOCTL_PVERSION:
+@@ -1950,6 +1956,9 @@ static int snd_timer_user_fasync(int fd, struct file * file, int on)
+ {
+ 	struct snd_timer_user *tu;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	tu = file->private_data;
+ 	return fasync_helper(fd, file, on, &tu->fasync);
+ }
+@@ -1962,6 +1971,9 @@ static ssize_t snd_timer_user_read(struct file *file, char __user *buffer,
+ 	int qhead;
+ 	int err = 0;
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	tu = file->private_data;
+ 	unit = tu->tread ? sizeof(struct snd_timer_tread) : sizeof(struct snd_timer_read);
+ 	mutex_lock(&tu->ioctl_lock);
+@@ -2029,6 +2041,9 @@ static unsigned int snd_timer_user_poll(struct file *file, poll_table * wait)
+         unsigned int mask;
+         struct snd_timer_user *tu;
+ 
++	if (!snd_allowed_ctx())
++		return 0;
++
+         tu = file->private_data;
+ 
+         poll_wait(file, &tu->qchange_sleep, wait);
+diff --git a/sound/core/timer_compat.c b/sound/core/timer_compat.c
+index e00f7e399e462..d52a28c9ab618 100644
+--- a/sound/core/timer_compat.c
++++ b/sound/core/timer_compat.c
+@@ -138,6 +138,9 @@ static long __snd_timer_user_ioctl_compat(struct file *file, unsigned int cmd,
+ {
+ 	void __user *argp = compat_ptr(arg);
+ 
++	if (!snd_allowed_ctx())
++		return -EBADFD;
++
+ 	switch (cmd) {
+ 	case SNDRV_TIMER_IOCTL_PVERSION:
+ 	case SNDRV_TIMER_IOCTL_TREAD:
+-- 
+2.17.0
+

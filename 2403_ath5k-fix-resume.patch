@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yves-Alexis Perez <clipos@ssi.gouv.fr>
+Date: Tue, 11 Oct 2011 16:01:43 +0200
+Subject: [PATCH 32/32] clip: drivers: Prevent oops in ath5k_hw_set_coverage
+
+https://lists.ath5k.org/pipermail/ath5k-devel/2011-March/004638.html
+
+Patch: 2403_ath5k-fix-resume.patch
+---
+ drivers/net/wireless/ath/ath5k/pcu.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath5k/pcu.c b/drivers/net/wireless/ath/ath5k/pcu.c
+index f23c851765df4..33e91987081ff 100644
+--- a/drivers/net/wireless/ath/ath5k/pcu.c
++++ b/drivers/net/wireless/ath/ath5k/pcu.c
+@@ -821,14 +821,18 @@ ath5k_hw_check_beacon_timers(struct ath5k_hw *ah, int intval)
+ void
+ ath5k_hw_set_coverage_class(struct ath5k_hw *ah, u8 coverage_class)
+ {
++	struct ath_common *common = ath5k_hw_common(ah);
++
+ 	/* As defined by IEEE 802.11-2007 17.3.8.6 */
+ 	int slot_time = ath5k_hw_get_default_slottime(ah) + 3 * coverage_class;
+ 	int ack_timeout = ath5k_hw_get_default_sifs(ah) + slot_time;
+ 	int cts_timeout = ack_timeout;
+ 
+-	ath5k_hw_set_ifs_intervals(ah, slot_time);
+-	ath5k_hw_set_ack_timeout(ah, ack_timeout);
+-	ath5k_hw_set_cts_timeout(ah, cts_timeout);
++	if (common->clockrate) {
++		ath5k_hw_set_ifs_intervals(ah, slot_time);
++		ath5k_hw_set_ack_timeout(ah, ack_timeout);
++		ath5k_hw_set_cts_timeout(ah, cts_timeout);
++	}
+ 
+ 	ah->ah_coverage_class = coverage_class;
+ }
+-- 
+2.17.0
+

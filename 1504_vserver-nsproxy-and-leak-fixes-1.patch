@@ -1,0 +1,138 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Spengler <spender@grsecurity.net>
+Date: Tue, 26 May 2015 20:42:25 -0400
+Subject: [PATCH 04/32] clip: vserver/grsec: Fix vserver nsproxy access and
+ infoleaks
+
+Fix vserver nsproxy access/locking and prevent vserver infoleaks.
+
+Port fix from grsecurity-3.1-3.2.69-vs2.3.2.17-201505272111.patch to Linux v3.14.y
+
+commit 6d8c3fc3e2a82381c3d510c8fe20584295522d58
+Author: Brad Spengler <spender@grsecurity.net>
+Date:   Tue May 26 20:42:25 2015 -0400
+
+vserver wasn't using the proper protections when accessing the nsproxy pointer
+of another task.  Rewrite its /proc/pid/nsproxy handling to obey the rules
+stated in include/linux/nsproxy.h
+
+Thanks to Thomas Calderon for the report
+
+  fs/proc/array.c |   36 +++++++++++++++++++++++-------------
+1 files changed, 23 insertions(+), 13 deletions(-)
+
+commit 5f80ac644a63e7c5de4149dd8cec64dd8e8db304
+Author: Brad Spengler <spender@grsecurity.net>
+Date:   Tue May 26 17:23:16 2015 -0400
+
+Prevent more vserver infoleaks
+
+kernel/vserver/cvirt_proc.h |    4 ++--
+1 files changed, 2 insertions(+), 2 deletions(-)
+
+commit 11fed623db78a324e698181da40f4e3520fdb385
+Author: Brad Spengler <spender@grsecurity.net>
+Date:   Tue May 26 09:17:58 2015 -0400
+
+vserver was leaking kernel addresses -- properly hide them absent
+PAX_USERCOPY, which would have triggered on this.
+fs/proc/array.c |   12 ++++++------
+1 files changed, 6 insertions(+), 6 deletions(-)
+
+Patch: 1504_vserver-nsproxy-and-leak-fixes-1.patch
+---
+ fs/namei.c                  |  2 +-
+ fs/proc/array.c             | 48 ++++++++++++++++++++++---------------
+ kernel/vserver/cvirt_proc.h |  2 +-
+ 3 files changed, 31 insertions(+), 21 deletions(-)
+
+diff --git a/fs/namei.c b/fs/namei.c
+index bb66d2cec84ba..8e2d551ebbbfa 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -5423,7 +5423,7 @@ int vx_info_mnt_namespace(struct mnt_namespace *ns, char *buffer)
+ 	path.dentry = vmnt->mnt_root;
+ 	root = d_path(&path, pstr, PATH_MAX - 2);
+ 	length = sprintf(buffer + length,
+-			 "Namespace:\t%p [#%u]\n"
++			 "Namespace:\t%pK [#%u]\n"
+ 			 "RootPath:\t%s\n",
+ 			 ns, atomic_read(&ns->count),
+ 			 root);
+diff --git a/fs/proc/array.c b/fs/proc/array.c
+index 25afcb84293d7..283043fa4864b 100644
+--- a/fs/proc/array.c
++++ b/fs/proc/array.c
+@@ -390,27 +390,37 @@ static inline void task_pax(struct seq_file *m, struct task_struct *p)
+ int proc_pid_nsproxy(struct seq_file *m, struct pid_namespace *ns,
+ 			struct pid *pid, struct task_struct *task)
+ {
+-	seq_printf(m,	"Proxy:\t%p(%c)\n"
++	struct nsproxy *nsproxy;
++
++	rcu_read_lock();
++	nsproxy = task_nsproxy(task);
++	if (nsproxy == NULL)
++		goto out;
++
++	seq_printf(m,   "Proxy:\t%pK(%c)\n"
+ 			"Count:\t%u\n"
+-			"uts:\t%p(%c)\n"
+-			"ipc:\t%p(%c)\n"
+-			"mnt:\t%p(%c)\n"
+-			"pid:\t%p(%c)\n"
+-			"net:\t%p(%c)\n",
+-			task->nsproxy,
+-			(task->nsproxy == init_task.nsproxy ? 'I' : '-'),
+-			atomic_read(&task->nsproxy->count),
+-			task->nsproxy->uts_ns,
+-			(task->nsproxy->uts_ns == init_task.nsproxy->uts_ns ? 'I' : '-'),
+-			task->nsproxy->ipc_ns,
+-			(task->nsproxy->ipc_ns == init_task.nsproxy->ipc_ns ? 'I' : '-'),
+-			task->nsproxy->mnt_ns,
+-			(task->nsproxy->mnt_ns == init_task.nsproxy->mnt_ns ? 'I' : '-'),
+-			task->nsproxy->pid_ns_for_children,
+-			(task->nsproxy->pid_ns_for_children ==
++			"uts:\t%pK(%c)\n"
++			"ipc:\t%pK(%c)\n"
++			"mnt:\t%pK(%c)\n"
++			"pid:\t%pK(%c)\n"
++			"net:\t%pK(%c)\n",
++			nsproxy,
++			(nsproxy == init_task.nsproxy ? 'I' : '-'),
++			atomic_read(&nsproxy->count),
++			nsproxy->uts_ns,
++			(nsproxy->uts_ns == init_task.nsproxy->uts_ns ? 'I' : '-'),
++			nsproxy->ipc_ns,
++			(nsproxy->ipc_ns == init_task.nsproxy->ipc_ns ? 'I' : '-'),
++			nsproxy->mnt_ns,
++			(nsproxy->mnt_ns == init_task.nsproxy->mnt_ns ? 'I' : '-'),
++			nsproxy->pid_ns_for_children,
++			(nsproxy->pid_ns_for_children ==
+ 				init_task.nsproxy->pid_ns_for_children ? 'I' : '-'),
+-			task->nsproxy->net_ns,
+-			(task->nsproxy->net_ns == init_task.nsproxy->net_ns ? 'I' : '-'));
++			nsproxy->net_ns,
++			(nsproxy->net_ns == init_task.nsproxy->net_ns ? 'I' : '-'));
++
++out:
++	rcu_read_unlock();
+ 	return 0;
+ }
+ 
+diff --git a/kernel/vserver/cvirt_proc.h b/kernel/vserver/cvirt_proc.h
+index d9453d7d72a11..5b4378d7d3ab1 100644
+--- a/kernel/vserver/cvirt_proc.h
++++ b/kernel/vserver/cvirt_proc.h
+@@ -21,7 +21,7 @@ int vx_info_proc_nsproxy(struct nsproxy *nsproxy, char *buffer)
+ 		goto out;
+ 
+ 	length += sprintf(buffer + length,
+-		"NSProxy:\t%p [%p,%p,%p]\n",
++		"NSProxy:\t%pK [%pK,%pK,%pK]\n",
+ 		nsproxy, nsproxy->mnt_ns,
+ 		nsproxy->uts_ns, nsproxy->ipc_ns);
+ 
+-- 
+2.17.0
+

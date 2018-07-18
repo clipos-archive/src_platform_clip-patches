@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ANSSI <clipos@ssi.gouv.fr>
+Date: Tue, 4 Oct 2011 15:31:05 +0200
+Subject: [PATCH 21/32] clip: vserver: Add vserver context id (xid) to audit
+ messages
+
+Patch: 1521_audit_xid.patch
+---
+ kernel/audit.c   | 2 ++
+ kernel/audit.h   | 1 +
+ kernel/auditsc.c | 2 +-
+ 3 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/audit.c b/kernel/audit.c
+index 8a65b3c853db9..3e7dc27e3f242 100644
+--- a/kernel/audit.c
++++ b/kernel/audit.c
+@@ -1919,9 +1919,11 @@ void audit_log_task_info(struct audit_buffer *ab, struct task_struct *tsk)
+ 	cred = current_cred();
+ 	tty = audit_get_tty(tsk);
+ 	audit_log_format(ab,
++			 " xid=%d"
+ 			 " ppid=%d pid=%d auid=%u uid=%u gid=%u"
+ 			 " euid=%u suid=%u fsuid=%u"
+ 			 " egid=%u sgid=%u fsgid=%u tty=%s ses=%u",
++			 tsk->xid,
+ 			 task_ppid_nr(tsk),
+ 			 task_tgid_nr(tsk),
+ 			 from_kuid(&init_user_ns, audit_get_loginuid(tsk)),
+diff --git a/kernel/audit.h b/kernel/audit.h
+index 431444c3708bf..8d929eed974ac 100644
+--- a/kernel/audit.h
++++ b/kernel/audit.h
+@@ -135,6 +135,7 @@ struct audit_context {
+ 	struct sockaddr_storage *sockaddr;
+ 	size_t sockaddr_len;
+ 				/* Save things to print about task_struct */
++	vxid_t		    xid;
+ 	pid_t		    pid, ppid;
+ 	kuid_t		    uid, euid, suid, fsuid;
+ 	kgid_t		    gid, egid, sgid, fsgid;
+diff --git a/kernel/auditsc.c b/kernel/auditsc.c
+index 44f5ab8d43f85..80802967a082a 100644
+--- a/kernel/auditsc.c
++++ b/kernel/auditsc.c
+@@ -2377,7 +2377,7 @@ static void audit_log_task(struct audit_buffer *ab)
+ 			 from_kgid(&init_user_ns, gid),
+ 			 sessionid);
+ 	audit_log_task_context(ab);
+-	audit_log_format(ab, " pid=%d comm=", task_tgid_nr(current));
++	audit_log_format(ab, " xid=%d pid=%d comm=", current->xid, task_tgid_nr(current));
+ 	audit_log_untrustedstring(ab, get_task_comm(comm, current));
+ 	audit_log_d_path_exe(ab, current->mm);
+ }
+-- 
+2.17.0
+

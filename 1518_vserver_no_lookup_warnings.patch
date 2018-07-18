@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Tue, 7 Jun 2011 14:29:32 +0200
+Subject: [PATCH 18/32] clip: vserver: Remove '<task> did lookup hidden <file>'
+ warnings
+
+Remove the verbose messaging when lookup failure
+
+Remove '<task> did lookup hidden <file>' vserver warnings, which tend to
+clobber the logs and are much less significant than other vserver
+warnings.
+
+Patch: 1518_vserver_no_lookup_warnings.patch
+---
+ fs/namei.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/fs/namei.c b/fs/namei.c
+index ed8c3fe69ce68..5bbebd41a9745 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -374,6 +374,7 @@ static int __dx_permission(const struct inode *inode, int mask)
+ int dx_permission(const struct inode *inode, int mask)
+ {
+ 	int ret = __dx_permission(inode, mask);
++#if 0
+ 	if (unlikely(ret)) {
+ #ifndef	CONFIG_VSERVER_WARN_DEVPTS
+ 		if (inode->i_sb->s_magic != DEVPTS_SUPER_MAGIC)
+@@ -383,6 +384,7 @@ int dx_permission(const struct inode *inode, int mask)
+ 				       mask, inode->i_sb->s_id, inode,
+ 				       i_tag_read(inode), inode->i_ino);
+ 	}
++#endif
+ 	return ret;
+ }
+ 
+-- 
+2.17.0
+

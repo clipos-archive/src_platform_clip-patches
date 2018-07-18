@@ -1,0 +1,130 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Mon, 1 Jan 2007 00:00:00 +0200
+Subject: [PATCH 10/32] clip: grsec: Add stricter TPE mode to grsec's
+ implementation
+
+Strict Trusted Path Execution: The TPE restrictions will be enforced on
+all users, _including_ root, who will be unable to (directly) execute
+anything that could be written to by any other user.
+
+Patch: 1510_grsec_tpe_strict.patch
+---
+ grsecurity/Kconfig      | 17 +++++++++++++----
+ grsecurity/grsec_init.c |  2 ++
+ grsecurity/grsec_tpe.c  | 15 ++++++++++++++-
+ 3 files changed, 29 insertions(+), 5 deletions(-)
+
+diff --git a/grsecurity/Kconfig b/grsecurity/Kconfig
+index f1c1ee2847c71..c429fdf997bf4 100644
+--- a/grsecurity/Kconfig
++++ b/grsecurity/Kconfig
+@@ -916,9 +916,17 @@ config GRKERNSEC_TPE
+ 	  root-owned directories writable only by root.  If the sysctl option
+ 	  is enabled, a sysctl option with name "tpe" is created.
+ 
++config GRKERNSEC_TPE_STRICT
++	bool "Enforce strict TPE restrictions on all users"
++	depends on GRKERNSEC_TPE
++	help
++	  If you say Y here, the TPE restrictions will be enforced on all
++	  users, including root, who will be unable to (directly) execute
++	  anything that could be written to by any other user.
++
+ config GRKERNSEC_TPE_ALL
+ 	bool "Partially restrict all non-root users"
+-	depends on GRKERNSEC_TPE
++	depends on GRKERNSEC_TPE && !GRKERNSEC_TPE_STRICT
+ 	help
+ 	  If you say Y here, all non-root users will be covered under
+ 	  a weaker TPE restriction.  This is separate from, and in addition to,
+@@ -932,7 +940,7 @@ config GRKERNSEC_TPE_ALL
+ 
+ config GRKERNSEC_TPE_INVERT
+ 	bool "Invert GID option"
+-	depends on GRKERNSEC_TPE
++	depends on GRKERNSEC_TPE && !GRKERNSEC_TPE_STRICT
+ 	help
+ 	  If you say Y here, the group you specify in the TPE configuration will
+ 	  decide what group TPE restrictions will be *disabled* for.  This
+@@ -945,10 +953,11 @@ config GRKERNSEC_TPE_GID
+ 	int
+ 	default GRKERNSEC_TPE_UNTRUSTED_GID if (GRKERNSEC_TPE && !GRKERNSEC_TPE_INVERT)
+ 	default GRKERNSEC_TPE_TRUSTED_GID if (GRKERNSEC_TPE && GRKERNSEC_TPE_INVERT)
++	depends on !GRKERNSEC_TPE_STRICT
+ 	
+ config GRKERNSEC_TPE_UNTRUSTED_GID
+ 	int "GID for TPE-untrusted users"
+-	depends on GRKERNSEC_TPE && !GRKERNSEC_TPE_INVERT
++	depends on GRKERNSEC_TPE && !GRKERNSEC_TPE_INVERT && !GRKERNSEC_TPE_STRICT
+ 	default 1005
+ 	help
+ 	  Setting this GID determines what group TPE restrictions will be
+@@ -957,7 +966,7 @@ config GRKERNSEC_TPE_UNTRUSTED_GID
+ 
+ config GRKERNSEC_TPE_TRUSTED_GID
+ 	int "GID for TPE-trusted users"
+-	depends on GRKERNSEC_TPE && GRKERNSEC_TPE_INVERT
++	depends on GRKERNSEC_TPE && GRKERNSEC_TPE_INVERT && !GRKERNSEC_TPE_STRICT
+ 	default 1005
+ 	help
+ 	  Setting this GID determines what group TPE restrictions will be
+diff --git a/grsecurity/grsec_init.c b/grsecurity/grsec_init.c
+index 68222080fd42a..dd21d9434ed57 100644
+--- a/grsecurity/grsec_init.c
++++ b/grsecurity/grsec_init.c
+@@ -268,7 +268,9 @@ grsecurity_init(void)
+ #endif
+ #ifdef CONFIG_GRKERNSEC_TPE
+ 	grsec_enable_tpe = 1;
++#ifndef CONFIG_GRKERNSEC_TPE_STRICT
+ 	grsec_tpe_gid = KGIDT_INIT(CONFIG_GRKERNSEC_TPE_GID);
++#endif
+ #ifdef CONFIG_GRKERNSEC_TPE_ALL
+ 	grsec_enable_tpe_all = 1;
+ #endif
+diff --git a/grsecurity/grsec_tpe.c b/grsecurity/grsec_tpe.c
+index cbd277622bbf7..99e097fe8a6f2 100644
+--- a/grsecurity/grsec_tpe.c
++++ b/grsecurity/grsec_tpe.c
+@@ -11,16 +11,28 @@ gr_tpe_allow(const struct file *file)
+ {
+ #ifdef CONFIG_GRKERNSEC
+ 	struct inode *inode = d_backing_inode(file->f_path.dentry->d_parent);
+-	struct inode *file_inode = d_backing_inode(file->f_path.dentry);
+ 	const struct cred *cred = current_cred();
++#ifndef CONFIG_GRKERNSEC_TPE_STRICT
++	struct inode *file_inode = d_backing_inode(file->f_path.dentry);
+ 	char *msg = NULL;
+ 	char *msg2 = NULL;
++#endif
+ 
+ 	// never restrict root
+ 	if (gr_is_global_root(cred->uid))
+ 		return 1;
+ 
+ 	if (grsec_enable_tpe) {
++#ifdef CONFIG_GRKERNSEC_TPE_STRICT
++	if (gr_is_global_nonroot(inode->i_uid) ||
++			(gr_is_global_root(inode->i_uid) &&
++			((inode->i_mode & S_IWGRP) || (inode->i_mode & S_IWOTH)))) {
++		gr_log_str_fs(GR_DONT_AUDIT, GR_EXEC_TPE_MSG, "strict TPE", file->f_path.dentry, file->f_path.mnt);
++		return 0;
++	}
++	return 1;
++	}
++#else
+ #ifdef CONFIG_GRKERNSEC_TPE_INVERT
+ 		if (grsec_enable_tpe_invert && !in_group_p(grsec_tpe_gid))
+ 			msg = "not being in trusted group";
+@@ -73,6 +85,7 @@ gr_tpe_allow(const struct file *file)
+ 		return 0;
+ 	}
+ #endif
++#endif /* CONFIG_GRKERNSEC_STRICT */
+ #endif
+ 	return 1;
+ }
+-- 
+2.17.0
+

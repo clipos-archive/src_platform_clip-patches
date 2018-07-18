@@ -1,0 +1,392 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arnaud Ebalard <clipos@ssi.gouv.fr>
+Date: Thu, 5 Feb 2015 18:45:51 +0100
+Subject: [PATCH 27/32] clip: arm/boot/dts: Add DTS for Eurisko board
+
+Patch: 1720_ARM_eurisko_dts.patch
+---
+ arch/arm/boot/dts/Makefile               |   1 +
+ arch/arm/boot/dts/armada-370-eurisko.dts | 359 +++++++++++++++++++++++
+ 2 files changed, 360 insertions(+)
+ create mode 100644 arch/arm/boot/dts/armada-370-eurisko.dts
+
+diff --git a/arch/arm/boot/dts/Makefile b/arch/arm/boot/dts/Makefile
+index 7037201c5e3a7..8830e03b1731f 100644
+--- a/arch/arm/boot/dts/Makefile
++++ b/arch/arm/boot/dts/Makefile
+@@ -906,6 +906,7 @@ dtb-$(CONFIG_ARCH_ZYNQ) += \
+ dtb-$(CONFIG_MACH_ARMADA_370) += \
+ 	armada-370-db.dtb \
+ 	armada-370-dlink-dns327l.dtb \
++	armada-370-eurisko.dtb \
+ 	armada-370-mirabox.dtb \
+ 	armada-370-netgear-rn102.dtb \
+ 	armada-370-netgear-rn104.dtb \
+diff --git a/arch/arm/boot/dts/armada-370-eurisko.dts b/arch/arm/boot/dts/armada-370-eurisko.dts
+new file mode 100644
+index 0000000000000..1b01b55ed163a
+--- /dev/null
++++ b/arch/arm/boot/dts/armada-370-eurisko.dts
+@@ -0,0 +1,359 @@
++/*
++ * Copyright (C) 2014 ANSSI
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/interrupt-controller/irq.h>
++#include <dt-bindings/input/input.h>
++#include <dt-bindings/gpio/gpio.h>
++#include "armada-370.dtsi"
++
++/ {
++	model = "ANSSI eurisko board";
++	compatible = "anssi,eurisko", "marvell,armada370", "marvell,armada-370-xp";
++
++	chosen {
++		bootargs = "console=ttyS0,115200 earlyprintk";
++	};
++
++	memory {
++		device_type = "memory";
++		reg = <0x00000000 0x40000000>; /* 1GB */
++	};
++
++	soc {
++		ranges = <MBUS_ID(0xf0, 0x01) 0 0xf1000000 0x100000
++			  MBUS_ID(0x01, 0xe0) 0 0xfff00000 0x100000>;
++
++		internal-regs {
++			rtc@10300 {
++				status = "disabled";
++			};
++
++			serial@12000 {
++				clock-frequency = <200000000>;
++				status = "okay";
++			};
++
++			pinctrl {
++
++				pmx_uart0: pmx-uart0 {
++					marvell,pins = "mpp0", "mpp1"; /* rx, tx */
++					marvell,function = "uart0";
++				};
++
++				pmx_i2c0: pmx-i2c0 {
++					marvell,pins = "mpp2", "mpp3"; /* scl, sda */
++					marvell,function = "i2c0";
++				};
++
++				pmx_usb_oc: pmx-usb-oc { /* USB over current alarm */
++					marvell,pins = "mpp4";
++					marvell,function = "gpio";
++				};
++
++				pmx_ge0: pmx-ge0 {
++					marvell,pins = "mpp5", "mpp6", "mpp7", "mpp8",
++						       "mpp9", "mpp10", "mpp11", "mpp12",
++						       "mpp13", "mpp14", "mpp15", "mpp16";
++					marvell,function = "ge0";
++				};
++
++				pmx_ge: pmx-ge {
++					marvell,pins = "mpp17", "mpp18"; /* mdc, mdio */
++					marvell,function = "ge";
++				};
++
++				pmx_ge1: pmx-ge1 {
++					marvell,pins = "mpp19", "mpp20", "mpp21", "mpp22",
++						       "mpp23", "mpp24", "mpp25", "mpp26",
++						       "mpp27", "mpp28", "mpp29", "mpp30";
++					marvell,function = "ge1";
++				};
++
++				pmx_rtc_alarm_int: pmx-rtc-alarm-int { /* RTC INT#1 */
++					marvell,pins = "mpp31";
++					marvell,function = "gpio";
++				};
++
++				pmx_spi: pmx-spi {
++					marvell,pins = "mpp32","mpp63","mpp64","mpp65";
++					marvell,function = "spi0";
++				};
++
++				pmx_rtc_timer_int: pmx-rtc-timer-int { /* RTC INT#2 */
++					marvell,pins = "mpp33";
++					marvell,function = "gpio";
++				};
++
++				/* MPP34-35: not used, sampled at reset (SAR) */
++
++				pmx_reset: pmx-reset {
++					marvell,pins = "mpp36";
++					marvell,function = "gpo";
++				};
++
++				pmx_poweroff: pmx-poweroff {
++					marvell,pins = "mpp37";
++					marvell,function = "gpo";
++				};
++
++				pmx_sd_status: pmx-sd-status {
++					marvell,pins = "mpp38";
++					marvell,function = "gpio";
++				};
++
++				pmx_green_led_pin: pmx-green-led-pin { /* LED 1 */
++					marvell,pins = "mpp39";
++					marvell,function = "gpo";
++				};
++
++				pmx_ioheader_pin_13: pmx-ioheader-pin-13 {
++					marvell,pins = "mpp40";
++					marvell,function = "gpio"; /* or uart1(rts) */
++				};
++
++				pmx_tpm_irq: pmx-tpm-irq {
++					marvell,pins = "mpp41";
++					marvell,function = "gpio";
++				};
++
++				pmx_red_led_pin: pmx-red-led-pin {     /* LED 2 */
++					marvell,pins = "mpp42";
++					marvell,function = "gpo";
++				};
++
++				pmx_usb0_pwr_en: pmx-usb0-pwr-en { /* USB0 power enable */
++					marvell,pins = "mpp43";
++					marvell,function = "gpo";
++				};
++
++				pmx_blue_led_pin: pmx-blue-led-pin {   /* LED 0 */
++					marvell,pins = "mpp44";
++					marvell,function = "gpo";
++				};
++
++				/* MPP45-46: not used, sampled at reset (SAR) */
++
++				pmx_sdio: pmx-sdio {
++					marvell,pins = "mpp47", "mpp48", "mpp49",
++						       "mpp50", "mpp51", "mpp52";
++					marvell,function = "sd0";
++				};
++
++				pmx_ioheader_pin_1: pmx-ioheader-pin-1 {
++					marvell,pins = "mpp53";
++					marvell,function = "gpio"; /* or tdm(pclk) */
++				};
++
++				pmx_ioheader_pin_3: pmx-ioheader-pin-3 {
++					marvell,pins = "mpp54";
++					marvell,function = "gpo"; /* or tdm(dtx) */
++				};
++
++				pmx_ioheader_pin_5: pmx-ioheader-pin-5 {
++					marvell,pins = "mpp55";
++					marvell,function = "gpio"; /* or tdm(rst) */
++				};
++
++				pmx_ioheader_pin_19: pmx-ioheader-pin-19 {
++					marvell,pins = "mpp56";
++					marvell,function = "gpio"; /* or uart1(cts) */
++				};
++
++				pmx_ioheader_pin_9: pmx-ioheader-pin-9 {
++					marvell,pins = "mpp57";
++					marvell,function = "gpio"; /* or tdm(fsync) */
++				};
++
++				pmx_ioheader_pin_11: pmx-ioheader-pin-11 {
++					marvell,pins = "mpp58";
++					marvell,function = "gpio"; /* or tdm(int) */
++				};
++
++				pmx_usb1_pwr_en: pmx-usb1-pwr-en { /* USB1 power enable */
++					marvell,pins = "mpp59";
++					marvell,function = "gpo";
++				};
++
++				pmx_ioheader_pin_17: pmx-ioheader-pin-17 {
++					marvell,pins = "mpp60";
++					marvell,function = "gpio"; /* or uart1(rxd) */
++				};
++
++				pmx_ioheader_pin_15: pmx-ioheader-pin-15 {
++					marvell,pins = "mpp61";
++					marvell,function = "gpo"; /* or uart1(txd) */
++				};
++
++				pmx_ioheader_pin_7: pmx-ioheader-pin-7 {
++					marvell,pins = "mpp62";
++					marvell,function = "gpio"; /* or tdm(drx) */
++				};
++
++				/* MPP63-65: SPI0, see MPP32 */
++			};
++
++			mdio {
++				phy0: ethernet-phy@0 { /* Marvell 88E1518 */
++					reg = <0>;
++				};
++
++				phy1: ethernet-phy@1 { /* Marvell 88E1518 */
++					reg = <1>;
++				};
++			};
++
++			ethernet@70000 {
++				pinctrl-0 = <&pmx_ge0>;
++				pinctrl-names = "default";
++				status = "okay";
++				phy = <&phy0>;
++				phy-mode = "rgmii-id";
++			};
++
++			ethernet@74000 {
++				pinctrl-0 = <&pmx_ge1>;
++				pinctrl-names = "default";
++				status = "okay";
++				phy = <&phy1>;
++				phy-mode = "rgmii-id";
++			};
++
++			usb@50000 {
++				status = "okay";
++			};
++
++			usb@51000 {
++				status = "okay";
++			};
++
++			spi0: spi@10600 { /* SPI interface w/ ST33G1M2 */
++				pinctrl-0 = <&pmx_spi>;
++				pinctrl-names = "default";
++				status = "okay";
++
++				spi-st33g1m2@0 {
++					#address-cells = <1>;
++					#size-cells = <1>;
++					compatible = "anssi,anssi-st33g1m2";
++					reg = <0>; /* Chip select 0 */
++					spi-max-frequency = <10000000>;
++				};
++			};
++
++			i2c@11000 {
++				clock-frequency = <100000>;
++				pinctrl-0 = <&pmx_i2c0>;
++				pinctrl-names = "default";
++				status = "okay";
++
++				ab_abb5zes3: ab-abb5zes3@68 {
++					compatible = "abracon,abb5zes3";
++					interrupt-parent = <&gpio0>;
++					interrupts = <31 IRQ_TYPE_EDGE_FALLING>;
++					pinctrl-0 = <&pmx_rtc_alarm_int>;
++					pinctrl-names = "default";
++					reg = <0x68>;
++				};
++
++				microchip_emc2301: microchip-emc2301@2f {
++					compatible = "microchip,emc2301";
++					microchip,push_pull_pwm_output = <1>;
++					microchip,inverted_polarity = <0>;
++					reg = <0x2f>;
++					pinctrl-0 = <&pmx_ioheader_pin_1>;
++					pinctrl-names = "default";
++					interrupt-parent = <&gpio1>;
++					interrupts = <21 IRQ_TYPE_EDGE_FALLING>;
++				};
++
++				st_tpm: st-tpm@13 {
++					compatible = "st,st33tpm12i2c";
++					pinctrl-0 = <&pmx_tpm_irq>;
++					pinctrl-names = "default";
++					interrupt-parent = <&gpio1>;
++					interrupts = <9 IRQ_TYPE_EDGE_RISING>;
++					reg = <0x13>;
++				};
++			};
++
++			/*
++			 * XXX spend more time on Documentation/devicetree/bindings/mmc/mmc.txt
++			 * for the various additional configuration knobs --arno
++			 */
++			mvsdio@d4000 {
++				pinctrl-0 = <&pmx_sdio>;
++				pinctrl-names = "default";
++				cd-gpios = <&gpio1 6 GPIO_ACTIVE_HIGH>;
++				status = "okay";
++			};
++		};
++	};
++
++	gpio-leds {
++		compatible = "gpio-leds";
++		pinctrl-0 = <&pmx_blue_led_pin
++			     &pmx_green_led_pin
++			     &pmx_red_led_pin>;
++		pinctrl-names = "default";
++
++		blue-led { /* LED 0 - Vishay TLMB1100-GS08 */
++			label = "blue1";
++			gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>;
++			default-state = "keep";
++		};
++
++		green-led { /* LED 1 - two color Avago HSMF-C165 */
++			label = "green2";
++			gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>;
++			default-state = "keep";
++		};
++
++		red-led {   /* LED 2 - two color Avago HSMF-C165 */
++			label = "red3";
++			gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
++			default-state = "keep";
++		};
++	};
++
++	regulators {
++		compatible = "simple-bus";
++		#address-cells = <1>;
++		#size-cells = <0>;
++		pinctrl-0 = <&pmx_usb0_pwr_en &pmx_usb1_pwr_en>;
++		pinctrl-names = "default";
++
++		usb0_regulator: usb0-regulator {
++			compatible = "regulator-fixed";
++			reg = <1>;
++			regulator-name = "USB port #0 power";
++			regulator-min-microvolt = <5000000>;
++			regulator-max-microvolt = <5000000>;
++			enable-active-high;
++			regulator-always-on;
++			regulator-boot-on;
++			gpio = <&gpio1 11 GPIO_ACTIVE_HIGH>;
++		};
++
++		usb1_regulator: usb1-regulator {
++			compatible = "regulator-fixed";
++			reg = <2>;
++			regulator-name = "USB port #1 power";
++			regulator-min-microvolt = <5000000>;
++			regulator-max-microvolt = <5000000>;
++			enable-active-high;
++			regulator-always-on;
++			regulator-boot-on;
++			gpio = <&gpio1 27 GPIO_ACTIVE_HIGH>;
++		};
++	};
++
++	gpio-poweroff {
++		compatible = "gpio-poweroff";
++		pinctrl-0 = <&pmx_poweroff>;
++		pinctrl-names = "default";
++		gpios = <&gpio1 5 GPIO_ACTIVE_LOW>;
++	};
++};
+-- 
+2.17.0
+

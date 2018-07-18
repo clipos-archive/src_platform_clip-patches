@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Mon, 17 Dec 2007 20:09:13 +0100
+Subject: [PATCH 14/32] clip: fs: Mount the anonymous inode FS as
+ RDONLY|NOATIME|NOLOCK
+
+Make anonymous inodes readonly and affect them noatime and nolock (when
+supported) mount flags
+
+Mount the anonymous inode FS as RDONLY|NOATIME|NOLOCK, and make the
+anonymous inode IMMUTABLE, to avoid creating a communication channel
+between jails.
+
+Patch: 1514_anon_inodes_readonly.patch
+---
+ fs/anon_inodes.c | 11 +++++++++++
+ fs/libfs.c       |  2 +-
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/fs/anon_inodes.c b/fs/anon_inodes.c
+index 80ef38c73e5a1..729632cd7e249 100644
+--- a/fs/anon_inodes.c
++++ b/fs/anon_inodes.c
+@@ -162,12 +162,23 @@ int anon_inode_getfd(const char *name, const struct file_operations *fops,
+ }
+ EXPORT_SYMBOL_GPL(anon_inode_getfd);
+ 
++
++#ifdef MNT_NOLOCK
++#define MNT_FLAGS	MNT_NOATIME | MNT_NOLOCK
++#else /* ! MNT_NOLOCK */
++#warning MNT_NOLOCK is not supported
++#define MNT_FLAGS	MNT_NOATIME
++#endif /* ! MNT_NOLOCK */
++
+ static int __init anon_inode_init(void)
+ {
+ 	anon_inode_mnt = kern_mount(&anon_inode_fs_type);
+ 	if (IS_ERR(anon_inode_mnt))
+ 		panic("anon_inode_init() kernel mount failed (%ld)\n", PTR_ERR(anon_inode_mnt));
+ 
++	/* Prevent FTP-over-fchmod-and-suchlike between jails... */
++	anon_inode_mnt->mnt_flags |= MNT_FLAGS;
++
+ 	anon_inode_inode = alloc_anon_inode(anon_inode_mnt->mnt_sb);
+ 	if (IS_ERR(anon_inode_inode))
+ 		panic("anon_inode_init() inode allocation failed (%ld)\n", PTR_ERR(anon_inode_inode));
+diff --git a/fs/libfs.c b/fs/libfs.c
+index 63538e66715c1..ce5dd91bb8977 100644
+--- a/fs/libfs.c
++++ b/fs/libfs.c
+@@ -1111,7 +1111,7 @@ struct inode *alloc_anon_inode(struct super_block *s)
+ 	inode->i_mode = S_IRUSR | S_IWUSR;
+ 	inode->i_uid = current_fsuid();
+ 	inode->i_gid = current_fsgid();
+-	inode->i_flags |= S_PRIVATE;
++	inode->i_flags |= S_PRIVATE | S_IMMUTABLE;
+ 	inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+ 	return inode;
+ }
+-- 
+2.17.0
+

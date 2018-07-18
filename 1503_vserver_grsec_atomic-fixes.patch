@@ -1,0 +1,472 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Wed, 15 May 2013 15:11:19 +0200
+Subject: [PATCH 03/32] clip: vserver/grsec: Fix atomic operations for
+ PAX_REFCOUNT
+
+Miscellaneous fixups for the vserver + grsec merge, anything other than
+failed hunks needed to make the two patches work together. Mostly
+PAX_REFCOUNT fixes.
+
+The grsecurity patch turns the users member of init_fs (struct fs_struct)
+into an atomic_t. Use fonctions from arch/x86/include/asm/atomic.h to
+properly increment/decrement the users value.
+
+Patch: 1503_vserver_grsec_atomic-fixes.patch
+---
+ include/linux/vs_socket.h         |  4 ++--
+ include/linux/vserver/cacct_def.h | 12 ++++++------
+ include/linux/vserver/cacct_int.h |  4 ++--
+ include/linux/vserver/cvirt_def.h |  7 ++++---
+ include/linux/vserver/limit.h     |  2 +-
+ include/linux/vserver/limit_def.h |  4 ++--
+ kernel/fork.c                     |  2 +-
+ kernel/vserver/cacct_init.h       |  8 ++++----
+ kernel/vserver/cacct_proc.h       | 24 ++++++++++++------------
+ kernel/vserver/context.c          |  8 ++------
+ kernel/vserver/cvirt.c            |  4 ++--
+ kernel/vserver/cvirt_init.h       |  4 ++--
+ kernel/vserver/cvirt_proc.h       |  4 ++--
+ kernel/vserver/history.c          |  6 +++---
+ kernel/vserver/limit.c            |  4 ++--
+ kernel/vserver/limit_init.h       |  2 +-
+ kernel/vserver/limit_proc.h       |  2 +-
+ kernel/vserver/proc.c             |  2 +-
+ kernel/vserver/space.c            |  4 ++--
+ mm/slab_vs.h                      |  4 ++--
+ 20 files changed, 54 insertions(+), 57 deletions(-)
+
+diff --git a/include/linux/vs_socket.h b/include/linux/vs_socket.h
+index b190e24c281a1..6652c153045be 100644
+--- a/include/linux/vs_socket.h
++++ b/include/linux/vs_socket.h
+@@ -39,8 +39,8 @@ static inline void __vx_acc_sock(struct vx_info *vxi,
+ 	if (vxi) {
+ 		int type = vx_sock_type(family);
+ 
+-		atomic_long_inc(&vxi->cacct.sock[type][pos].count);
+-		atomic_long_add(size, &vxi->cacct.sock[type][pos].total);
++		atomic_long_inc_unchecked(&vxi->cacct.sock[type][pos].count);
++		atomic_long_add_unchecked(size, &vxi->cacct.sock[type][pos].total);
+ 	}
+ }
+ 
+diff --git a/include/linux/vserver/cacct_def.h b/include/linux/vserver/cacct_def.h
+index 89b6df0dab9d3..45106039193f3 100644
+--- a/include/linux/vserver/cacct_def.h
++++ b/include/linux/vserver/cacct_def.h
+@@ -6,16 +6,16 @@
+ 
+ 
+ struct _vx_sock_acc {
+-	atomic_long_t count;
+-	atomic_long_t total;
++	atomic_long_unchecked_t count;
++	atomic_long_unchecked_t total;
+ };
+ 
+ /* context sub struct */
+ 
+ struct _vx_cacct {
+ 	struct _vx_sock_acc sock[VXA_SOCK_SIZE][3];
+-	atomic_t slab[8];
+-	atomic_t page[6][8];
++	atomic_unchecked_t slab[8];
++	atomic_unchecked_t page[6][8];
+ };
+ 
+ #ifdef CONFIG_VSERVER_DEBUG
+@@ -31,8 +31,8 @@ static inline void __dump_vx_cacct(struct _vx_cacct *cacct)
+ 		printk("\t [%d] =", i);
+ 		for (j = 0; j < 3; j++) {
+ 			printk(" [%d] = %8lu, %8lu", j,
+-				atomic_long_read(&ptr[j].count),
+-				atomic_long_read(&ptr[j].total));
++				atomic_long_read_unchecked(&ptr[j].count),
++				atomic_long_read_unchecked(&ptr[j].total));
+ 		}
+ 		printk("\n");
+ 	}
+diff --git a/include/linux/vserver/cacct_int.h b/include/linux/vserver/cacct_int.h
+index 05a1391a3e021..955e28a156a5c 100644
+--- a/include/linux/vserver/cacct_int.h
++++ b/include/linux/vserver/cacct_int.h
+@@ -4,14 +4,14 @@
+ static inline
+ unsigned long vx_sock_count(struct _vx_cacct *cacct, int type, int pos)
+ {
+-	return atomic_long_read(&cacct->sock[type][pos].count);
++	return atomic_long_read_unchecked(&cacct->sock[type][pos].count);
+ }
+ 
+ 
+ static inline
+ unsigned long vx_sock_total(struct _vx_cacct *cacct, int type, int pos)
+ {
+-	return atomic_long_read(&cacct->sock[type][pos].total);
++	return atomic_long_read_unchecked(&cacct->sock[type][pos].total);
+ }
+ 
+ #endif	/* _VSERVER_CACCT_INT_H */
+diff --git a/include/linux/vserver/cvirt_def.h b/include/linux/vserver/cvirt_def.h
+index e0442150aee32..0896ba6bb802e 100644
+--- a/include/linux/vserver/cvirt_def.h
++++ b/include/linux/vserver/cvirt_def.h
+@@ -47,11 +47,11 @@ struct _vx_cvirt {
+ 	uint64_t bias_clock;		/* offset in clock_t */
+ 
+ 	spinlock_t load_lock;		/* lock for the load averages */
+-	atomic_t load_updates;		/* nr of load updates done so far */
++	atomic_unchecked_t load_updates; /* nr of load updates done so far */
+ 	uint32_t load_last;		/* last time load was calculated */
+ 	uint32_t load[3];		/* load averages 1,5,15 */
+ 
+-	atomic_t total_forks;		/* number of forks so far */
++	atomic_unchecked_t total_forks;	/* number of forks so far */
+ 
+ 	struct _vx_syslog syslog;
+ };
+@@ -72,7 +72,8 @@ static inline void __dump_vx_cvirt(struct _vx_cvirt *cvirt)
+ 		atomic_read(&cvirt->nr_uninterruptible),
+ 		atomic_read(&cvirt->nr_onhold));
+ 	/* add rest here */
+-	printk("\t total_forks = %d\n", atomic_read(&cvirt->total_forks));
++	printk("\t total_forks = %d\n",
++		atomic_read_unchecked(&cvirt->total_forks));
+ }
+ 
+ #endif
+diff --git a/include/linux/vserver/limit.h b/include/linux/vserver/limit.h
+index a9db9e1877fb6..7091c24e6f9b1 100644
+--- a/include/linux/vserver/limit.h
++++ b/include/linux/vserver/limit.h
+@@ -27,7 +27,7 @@
+ #define __rlim_rmax(l, r)	__rlim_val(l, r, rmax)
+ 
+ #define __rlim_lhit(l, r)	__rlim_val(l, r, lhit)
+-#define __rlim_hit(l, r)	atomic_inc(&__rlim_lhit(l, r))
++#define __rlim_hit(l, r)	atomic_inc_unchecked(&__rlim_lhit(l, r))
+ 
+ typedef atomic_long_t rlim_atomic_t;
+ typedef unsigned long rlim_t;
+diff --git a/include/linux/vserver/limit_def.h b/include/linux/vserver/limit_def.h
+index b5c6aaa7887bb..a174571ed6f0e 100644
+--- a/include/linux/vserver/limit_def.h
++++ b/include/linux/vserver/limit_def.h
+@@ -15,7 +15,7 @@ struct _vx_res_limit {
+ 	rlim_t rmin;		/* Context minimum */
+ 	rlim_t rmax;		/* Context maximum */
+ 
+-	atomic_t lhit;		/* Limit hits */
++	atomic_unchecked_t lhit;		/* Limit hits */
+ };
+ 
+ /* context sub struct */
+@@ -38,7 +38,7 @@ static inline void __dump_vx_limit(struct _vx_limit *limit)
+ 			(unsigned long)__rlim_rmax(limit, i),
+ 			(long)__rlim_soft(limit, i),
+ 			(long)__rlim_hard(limit, i),
+-			atomic_read(&__rlim_lhit(limit, i)));
++			atomic_read_unchecked(&__rlim_lhit(limit, i)));
+ 	}
+ }
+ 
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 51cb0600c261e..9001d7e39ba0f 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -1984,7 +1984,7 @@ static __latent_entropy struct task_struct *copy_process(
+ 	if (vxi) {
+ 		claim_vx_info(vxi, p);
+ 		atomic_inc(&vxi->cvirt.nr_threads);
+-		atomic_inc(&vxi->cvirt.total_forks);
++		atomic_inc_unchecked(&vxi->cvirt.total_forks);
+ 		vx_nproc_inc(p);
+ 	}
+ 	nxi = p->nx_info;
+diff --git a/kernel/vserver/cacct_init.h b/kernel/vserver/cacct_init.h
+index 94d82e933c613..9c62601591c8b 100644
+--- a/kernel/vserver/cacct_init.h
++++ b/kernel/vserver/cacct_init.h
+@@ -7,15 +7,15 @@ static inline void vx_info_init_cacct(struct _vx_cacct *cacct)
+ 
+ 	for (i = 0; i < VXA_SOCK_SIZE; i++) {
+ 		for (j = 0; j < 3; j++) {
+-			atomic_long_set(&cacct->sock[i][j].count, 0);
+-			atomic_long_set(&cacct->sock[i][j].total, 0);
++			atomic_long_set_unchecked(&cacct->sock[i][j].count, 0);
++			atomic_long_set_unchecked(&cacct->sock[i][j].total, 0);
+ 		}
+ 	}
+ 	for (i = 0; i < 8; i++)
+-		atomic_set(&cacct->slab[i], 0);
++		atomic_set_unchecked(&cacct->slab[i], 0);
+ 	for (i = 0; i < 5; i++)
+ 		for (j = 0; j < 4; j++)
+-			atomic_set(&cacct->page[i][j], 0);
++			atomic_set_unchecked(&cacct->page[i][j], 0);
+ }
+ 
+ static inline void vx_info_exit_cacct(struct _vx_cacct *cacct)
+diff --git a/kernel/vserver/cacct_proc.h b/kernel/vserver/cacct_proc.h
+index 0de9a381ad967..c4af2899c3418 100644
+--- a/kernel/vserver/cacct_proc.h
++++ b/kernel/vserver/cacct_proc.h
+@@ -29,23 +29,23 @@ static inline int vx_info_proc_cacct(struct _vx_cacct *cacct, char *buffer)
+ 	length += sprintf(buffer + length, "\n");
+ 	length += sprintf(buffer + length,
+ 		"slab:\t %8u %8u %8u %8u\n",
+-		atomic_read(&cacct->slab[1]),
+-		atomic_read(&cacct->slab[4]),
+-		atomic_read(&cacct->slab[0]),
+-		atomic_read(&cacct->slab[2]));
++		atomic_read_unchecked(&cacct->slab[1]),
++		atomic_read_unchecked(&cacct->slab[4]),
++		atomic_read_unchecked(&cacct->slab[0]),
++		atomic_read_unchecked(&cacct->slab[2]));
+ 
+ 	length += sprintf(buffer + length, "\n");
+ 	for (i = 0; i < 5; i++) {
+ 		length += sprintf(buffer + length,
+ 			"page[%d]: %8u %8u %8u %8u\t %8u %8u %8u %8u\n", i,
+-			atomic_read(&cacct->page[i][0]),
+-			atomic_read(&cacct->page[i][1]),
+-			atomic_read(&cacct->page[i][2]),
+-			atomic_read(&cacct->page[i][3]),
+-			atomic_read(&cacct->page[i][4]),
+-			atomic_read(&cacct->page[i][5]),
+-			atomic_read(&cacct->page[i][6]),
+-			atomic_read(&cacct->page[i][7]));
++			atomic_read_unchecked(&cacct->page[i][0]),
++			atomic_read_unchecked(&cacct->page[i][1]),
++			atomic_read_unchecked(&cacct->page[i][2]),
++			atomic_read_unchecked(&cacct->page[i][3]),
++			atomic_read_unchecked(&cacct->page[i][4]),
++			atomic_read_unchecked(&cacct->page[i][5]),
++			atomic_read_unchecked(&cacct->page[i][6]),
++			atomic_read_unchecked(&cacct->page[i][7]));
+ 	}
+ 	return length;
+ }
+diff --git a/kernel/vserver/context.c b/kernel/vserver/context.c
+index 7e7b803dcd98e..5fe0138bdf13d 100644
+--- a/kernel/vserver/context.c
++++ b/kernel/vserver/context.c
+@@ -129,9 +129,7 @@ static struct vx_info *__alloc_vx_info(vxid_t xid)
+ 		struct _vx_space *space = &new->space[index];
+ 
+ 		// filesystem
+-		spin_lock(&init_fs.lock);
+-		init_fs.users++;
+-		spin_unlock(&init_fs.lock);
++		atomic_inc(&init_fs.users);
+ 		space->vx_fs = &init_fs;
+ 
+ 		/* FIXME: do we want defaults? */
+@@ -212,9 +210,7 @@ static void __shutdown_vx_info(struct vx_info *vxi)
+ 			put_nsproxy(nsproxy);
+ 
+ 		fs = xchg(&space->vx_fs, NULL);
+-		spin_lock(&fs->lock);
+-		kill = !--fs->users;
+-		spin_unlock(&fs->lock);
++		kill = !atomic_dec_return(&fs->users);
+ 		if (kill)
+ 			free_fs_struct(fs);
+ 
+diff --git a/kernel/vserver/cvirt.c b/kernel/vserver/cvirt.c
+index 18de814e0a323..d2920cafb8f97 100644
+--- a/kernel/vserver/cvirt.c
++++ b/kernel/vserver/cvirt.c
+@@ -100,7 +100,7 @@ void vx_update_load(struct vx_info *vxi)
+ 
+ 	vxi->cvirt.load_last = now;
+ out:
+-	atomic_inc(&vxi->cvirt.load_updates);
++	atomic_inc_unchecked(&vxi->cvirt.load_updates);
+ 	spin_unlock_irqrestore(&vxi->cvirt.load_lock, flags);
+ }
+ 
+@@ -258,7 +258,7 @@ int vc_virt_stat(struct vx_info *vxi, void __user *data)
+ 	vc_data.nr_running = atomic_read(&cvirt->nr_running);
+ 	vc_data.nr_uninterruptible = atomic_read(&cvirt->nr_uninterruptible);
+ 	vc_data.nr_onhold = atomic_read(&cvirt->nr_onhold);
+-	vc_data.nr_forks = atomic_read(&cvirt->total_forks);
++	vc_data.nr_forks = atomic_read_unchecked(&cvirt->total_forks);
+ 	vc_data.load[0] = cvirt->load[0];
+ 	vc_data.load[1] = cvirt->load[1];
+ 	vc_data.load[2] = cvirt->load[2];
+diff --git a/kernel/vserver/cvirt_init.h b/kernel/vserver/cvirt_init.h
+index 0a4a273b5bb78..62e148dd909b8 100644
+--- a/kernel/vserver/cvirt_init.h
++++ b/kernel/vserver/cvirt_init.h
+@@ -22,11 +22,11 @@ static inline void vx_info_init_cvirt(struct _vx_cvirt *cvirt)
+ 
+ 	spin_lock_init(&cvirt->load_lock);
+ 	cvirt->load_last = jiffies;
+-	atomic_set(&cvirt->load_updates, 0);
++	atomic_set_unchecked(&cvirt->load_updates, 0);
+ 	cvirt->load[0] = 0;
+ 	cvirt->load[1] = 0;
+ 	cvirt->load[2] = 0;
+-	atomic_set(&cvirt->total_forks, 0);
++	atomic_set_unchecked(&cvirt->total_forks, 0);
+ 
+ 	spin_lock_init(&cvirt->syslog.logbuf_lock);
+ 	init_waitqueue_head(&cvirt->syslog.log_wait);
+diff --git a/kernel/vserver/cvirt_proc.h b/kernel/vserver/cvirt_proc.h
+index 8a73686bac2ea..d9453d7d72a11 100644
+--- a/kernel/vserver/cvirt_proc.h
++++ b/kernel/vserver/cvirt_proc.h
+@@ -104,11 +104,11 @@ int vx_info_proc_cvirt(struct _vx_cvirt *cvirt, char *buffer)
+ 		atomic_read(&cvirt->nr_running),
+ 		atomic_read(&cvirt->nr_uninterruptible),
+ 		atomic_read(&cvirt->nr_onhold),
+-		atomic_read(&cvirt->load_updates),
++		atomic_read_unchecked(&cvirt->load_updates),
+ 		LOAD_INT(a), LOAD_FRAC(a),
+ 		LOAD_INT(b), LOAD_FRAC(b),
+ 		LOAD_INT(c), LOAD_FRAC(c),
+-		atomic_read(&cvirt->total_forks));
++		atomic_read_unchecked(&cvirt->total_forks));
+ 	return length;
+ }
+ 
+diff --git a/kernel/vserver/history.c b/kernel/vserver/history.c
+index e3e0712b3ce71..a8c9874f6b514 100644
+--- a/kernel/vserver/history.c
++++ b/kernel/vserver/history.c
+@@ -37,7 +37,7 @@ DEFINE_PER_CPU(struct _vx_history, vx_history_buffer);
+ 
+ unsigned volatile int vxh_active = 1;
+ 
+-static atomic_t sequence = ATOMIC_INIT(0);
++static atomic_unchecked_t sequence = ATOMIC_INIT(0);
+ 
+ 
+ /*	vxh_advance()
+@@ -54,7 +54,7 @@ struct _vx_hist_entry *vxh_advance(void *loc)
+ 	index = vxh_active ? (hist->counter++ % VXH_SIZE) : VXH_SIZE;
+ 	entry = &hist->entry[index];
+ 
+-	entry->seq = atomic_inc_return(&sequence);
++	entry->seq = atomic_inc_return_unchecked(&sequence);
+ 	entry->loc = loc;
+ 	return entry;
+ }
+@@ -140,7 +140,7 @@ static void __vxh_dump_history(void)
+ 	unsigned int i, cpu;
+ 
+ 	printk("History:\tSEQ: %8x\tNR_CPUS: %d\n",
+-		atomic_read(&sequence), NR_CPUS);
++		atomic_read_unchecked(&sequence), NR_CPUS);
+ 
+ 	for (i = 0; i < VXH_SIZE; i++) {
+ 		for_each_online_cpu(cpu) {
+diff --git a/kernel/vserver/limit.c b/kernel/vserver/limit.c
+index c1db3147789a4..8fba4bcdc0414 100644
+--- a/kernel/vserver/limit.c
++++ b/kernel/vserver/limit.c
+@@ -201,7 +201,7 @@ static inline void vx_reset_hits(struct _vx_limit *limit)
+ 	int lim;
+ 
+ 	for (lim = 0; lim < NUM_LIMITS; lim++) {
+-		atomic_set(&__rlim_lhit(limit, lim), 0);
++		atomic_set_unchecked(&__rlim_lhit(limit, lim), 0);
+ 	}
+ }
+ 
+@@ -244,7 +244,7 @@ int vc_rlimit_stat(struct vx_info *vxi, void __user *data)
+ 		return -EINVAL;
+ 
+ 	vx_limit_fixup(limit, id);
+-	vc_data.hits = atomic_read(&__rlim_lhit(limit, id));
++	vc_data.hits = atomic_read_unchecked(&__rlim_lhit(limit, id));
+ 	vc_data.value = __rlim_get(limit, id);
+ 	vc_data.minimum = __rlim_rmin(limit, id);
+ 	vc_data.maximum = __rlim_rmax(limit, id);
+diff --git a/kernel/vserver/limit_init.h b/kernel/vserver/limit_init.h
+index dfce7a20e3b4c..8f1910daaa95d 100644
+--- a/kernel/vserver/limit_init.h
++++ b/kernel/vserver/limit_init.h
+@@ -8,7 +8,7 @@ static inline void vx_info_init_limit(struct _vx_limit *limit)
+ 		__rlim_soft(limit, lim) = RLIM_INFINITY;
+ 		__rlim_hard(limit, lim) = RLIM_INFINITY;
+ 		__rlim_set(limit, lim, 0);
+-		atomic_set(&__rlim_lhit(limit, lim), 0);
++		atomic_set_unchecked(&__rlim_lhit(limit, lim), 0);
+ 		__rlim_rmin(limit, lim) = 0;
+ 		__rlim_rmax(limit, lim) = 0;
+ 	}
+diff --git a/kernel/vserver/limit_proc.h b/kernel/vserver/limit_proc.h
+index ff5d9102cf251..61e44734fcf1c 100644
+--- a/kernel/vserver/limit_proc.h
++++ b/kernel/vserver/limit_proc.h
+@@ -14,7 +14,7 @@
+ 	(unsigned long)__rlim_rmax(limit, r),	\
+ 	VX_VLIM(__rlim_soft(limit, r)),		\
+ 	VX_VLIM(__rlim_hard(limit, r)),		\
+-	atomic_read(&__rlim_lhit(limit, r))
++	atomic_read_unchecked(&__rlim_lhit(limit, r))
+ 
+ static inline int vx_info_proc_limit(struct _vx_limit *limit, char *buffer)
+ {
+diff --git a/kernel/vserver/proc.c b/kernel/vserver/proc.c
+index aedb7dba9e6e5..4234a1ac6675e 100644
+--- a/kernel/vserver/proc.c
++++ b/kernel/vserver/proc.c
+@@ -98,7 +98,7 @@ static int proc_virtual_status(char *buffer)
+ 		atomic_read(&vs_global_pid_ns),
+ 		atomic_read(&init_task.usage),
+ 		atomic_read(&init_task.nsproxy->count),
+-		init_task.fs->users);
++		atomic_read(&init_task.fs->users));
+ }
+ 
+ 
+diff --git a/kernel/vserver/space.c b/kernel/vserver/space.c
+index d4a8ea4c97c9d..347f360798fc5 100644
+--- a/kernel/vserver/space.c
++++ b/kernel/vserver/space.c
+@@ -264,7 +264,7 @@ int vx_enter_space(struct vx_info *vxi, unsigned long mask, unsigned index)
+ 	if (mask & CLONE_FS) {
+ 		spin_lock(&fs_cur->lock);
+ 		current->fs = fs;
+-		kill = !--fs_cur->users;
++		kill = !atomic_dec_return(&fs_cur->users);
+ 		spin_unlock(&fs_cur->lock);
+ 	}
+ 
+@@ -341,7 +341,7 @@ int vx_set_space(struct vx_info *vxi, unsigned long mask, unsigned index)
+ 	if (mask & CLONE_FS) {
+ 		spin_lock(&fs_vxi->lock);
+ 		space->vx_fs = fs;
+-		kill = !--fs_vxi->users;
++		kill = !atomic_dec_return(&fs_vxi->users);
+ 		spin_unlock(&fs_vxi->lock);
+ 	}
+ 
+diff --git a/mm/slab_vs.h b/mm/slab_vs.h
+index dd64efa9fdeb1..407e950a8647f 100644
+--- a/mm/slab_vs.h
++++ b/mm/slab_vs.h
+@@ -12,7 +12,7 @@ void vx_slab_alloc(struct kmem_cache *cachep, gfp_t flags)
+ 	if (!vxi)
+ 		return;
+ 
+-	atomic_add(cachep->size, &vxi->cacct.slab[what]);
++	atomic_add_unchecked(cachep->size, &vxi->cacct.slab[what]);
+ }
+ 
+ static inline
+@@ -24,6 +24,6 @@ void vx_slab_free(struct kmem_cache *cachep)
+ 	if (!vxi)
+ 		return;
+ 
+-	atomic_sub(cachep->size, &vxi->cacct.slab[what]);
++	atomic_sub_unchecked(cachep->size, &vxi->cacct.slab[what]);
+ }
+ 
+-- 
+2.17.0
+

@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Wed, 5 Mar 2008 20:26:11 +0100
+Subject: [PATCH 28/32] clip: fs: Support for O_MAYEXEC flag for sys_open()
+
+Add support for a O_MAYEXEC flag on sys_open(). When this flag is
+passed, sys_open will check that the mount options for the underlying
+vfsmount do not prevent execution. This may allow an interpreter to
+check exec permissions before reading commands from a file, and thus
+enforce W^X at their level.
+
+WARNING: The value of O_MAYEXEC is the same as __FMODE_EXEC since commit
+55ec82176eca which appeared upstream in 2009. Due to the purpose and
+current use of __FMODE_EXEC, this is not an issue for now but should
+still be kept in mind.
+
+Patch: 1901_open_mayexec.patch
+---
+ fs/namei.c                       | 8 ++++++++
+ fs/open.c                        | 4 ++++
+ include/linux/fcntl.h            | 2 +-
+ include/linux/fs.h               | 1 +
+ include/uapi/asm-generic/fcntl.h | 4 ++++
+ 5 files changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/fs/namei.c b/fs/namei.c
+index 5bbebd41a9745..5ebf4d16d4acf 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -3167,6 +3167,14 @@ static int may_open(struct path *path, int acc_mode, int flag)
+ 		mark_inode_dirty(inode);
+ 	}
+ #endif
++
++	if ((acc_mode & MAY_OPENEXEC)
++			&& (S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode))
++			&& (path->mnt && (path->mnt->mnt_flags & MNT_NOEXEC)))
++		return -EACCES;
++
++	acc_mode &= ~MAY_OPENEXEC;
++
+ 	error = inode_permission(inode, MAY_OPEN | acc_mode);
+ 	if (error)
+ 		return error;
+diff --git a/fs/open.c b/fs/open.c
+index 7a998841782f0..1388295b2c2ed 100644
+--- a/fs/open.c
++++ b/fs/open.c
+@@ -1008,6 +1008,10 @@ static inline int build_open_flags(int flags, umode_t mode, struct open_flags *o
+ 	if (flags & O_APPEND)
+ 		acc_mode |= MAY_APPEND;
+ 
++	/* Check exec permissions on open() */
++	if (flags & O_MAYEXEC)
++		acc_mode |= MAY_OPENEXEC;
++
+ 	op->acc_mode = acc_mode;
+ 
+ 	op->intent = flags & O_PATH ? 0 : LOOKUP_OPEN;
+diff --git a/include/linux/fcntl.h b/include/linux/fcntl.h
+index 1b48d9c9a5613..3fdad6e37b14d 100644
+--- a/include/linux/fcntl.h
++++ b/include/linux/fcntl.h
+@@ -8,7 +8,7 @@
+ 	(O_RDONLY | O_WRONLY | O_RDWR | O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC | \
+ 	 O_APPEND | O_NDELAY | O_NONBLOCK | O_NDELAY | __O_SYNC | O_DSYNC | \
+ 	 FASYNC	| O_DIRECT | O_LARGEFILE | O_DIRECTORY | O_NOFOLLOW | \
+-	 O_NOATIME | O_CLOEXEC | O_PATH | __O_TMPFILE)
++	 O_NOATIME | O_CLOEXEC | O_PATH | __O_TMPFILE | O_MAYEXEC)
+ 
+ #ifndef force_o_largefile
+ #define force_o_largefile() (BITS_PER_LONG != 32)
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 3cdc1e9fbfa2d..1ea5c7ec3b2d3 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -84,6 +84,7 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
+ #define MAY_CHDIR		0x00000040
+ /* called from RCU mode, don't block */
+ #define MAY_NOT_BLOCK		0x00000080
++#define MAY_OPENEXEC 		0x00000100
+ 
+ /*
+  * flags in file.f_mode.  Note that FMODE_READ and FMODE_WRITE must correspond
+diff --git a/include/uapi/asm-generic/fcntl.h b/include/uapi/asm-generic/fcntl.h
+index e063effe0cc18..a2aac7e1141b8 100644
+--- a/include/uapi/asm-generic/fcntl.h
++++ b/include/uapi/asm-generic/fcntl.h
+@@ -96,6 +96,10 @@
+ #define O_NDELAY	O_NONBLOCK
+ #endif
+ 
++#ifndef O_MAYEXEC
++#define O_MAYEXEC	00000040	/* command execution from file is intended, check exec permissions */
++#endif
++
+ #define F_DUPFD		0	/* dup */
+ #define F_GETFD		1	/* get close_on_exec */
+ #define F_SETFD		2	/* set/clear close_on_exec */
+-- 
+2.17.0
+

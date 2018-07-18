@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Fri, 29 Feb 2008 19:12:20 +0100
+Subject: [PATCH 16/32] clip: sysctl: Remove hotlug, vshelper and vdso_enabled
+
+Remove the following 'dangerous' sysctl entries:
+  - kernel.vshelper
+  - kernel.hotlug
+  - vm.vdso_enabled
+
+WARNING: Description used to mention kernel.suid_dumpable but that seems
+to be outdated if trusting the patch itself.
+
+Patch: 1516_sysctl_disable.patch
+---
+ kernel/sysctl.c | 33 ---------------------------------
+ 1 file changed, 33 deletions(-)
+
+diff --git a/kernel/sysctl.c b/kernel/sysctl.c
+index 90f595c8c9355..3024bdb599587 100644
+--- a/kernel/sysctl.c
++++ b/kernel/sysctl.c
+@@ -312,14 +312,6 @@ static struct ctl_table kern_table[] = {
+ 		.child		= pax_table,
+ 	},
+ #endif
+-
+-	{
+-		.procname	= "vshelper",
+-		.data		= &vshelper_path,
+-		.maxlen		= 256,
+-		.mode		= 0644,
+-		.proc_handler	= proc_dostring,
+-	},
+ 	{
+ 		.procname	= "sched_child_runs_first",
+ 		.data		= &sysctl_sched_child_runs_first,
+@@ -707,15 +699,6 @@ static struct ctl_table kern_table[] = {
+ 		.extra2		= &one,
+ 	},
+ #endif
+-#ifdef CONFIG_UEVENT_HELPER
+-	{
+-		.procname	= "hotplug",
+-		.data		= &uevent_helper,
+-		.maxlen		= UEVENT_HELPER_PATH_LEN,
+-		.mode		= 0644,
+-		.proc_handler	= proc_dostring,
+-	},
+-#endif
+ #ifdef CONFIG_CHR_DEV_SG
+ 	{
+ 		.procname	= "sg-big-buff",
+@@ -1634,22 +1617,6 @@ static struct ctl_table vm_table[] = {
+ 		.proc_handler	= numa_zonelist_order_handler,
+ 	},
+ #endif
+-#if (defined(CONFIG_X86_32) && !defined(CONFIG_UML))|| \
+-   (defined(CONFIG_SUPERH) && defined(CONFIG_VSYSCALL))
+-	{
+-		.procname	= "vdso_enabled",
+-#ifdef CONFIG_X86_32
+-		.data		= &vdso32_enabled,
+-		.maxlen		= sizeof(vdso32_enabled),
+-#else
+-		.data		= &vdso_enabled,
+-		.maxlen		= sizeof(vdso_enabled),
+-#endif
+-		.mode		= 0644,
+-		.proc_handler	= proc_dointvec,
+-		.extra1		= &zero,
+-	},
+-#endif
+ #ifdef CONFIG_HIGHMEM
+ 	{
+ 		.procname	= "highmem_is_dirtyable",
+-- 
+2.17.0
+

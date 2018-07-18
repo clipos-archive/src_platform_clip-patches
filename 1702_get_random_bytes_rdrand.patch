@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Thu, 16 Aug 2012 13:20:02 +0200
+Subject: [PATCH 25/32] clip: random: Do not use exclusively arch_get_random()
+ for get_random_bytes()
+
+When arch_get_random() is available (e.g. rdrand on IvyBridge), do not
+use it exclusively for get_random_bytes(), but mix its output with
+entropy extracted from the pool.
+
+A previous version used the non-blocking pool, which was removed with commit
+e192be9d9a30 ("random: replace non-blocking pool with a Chacha20-based CRNG").
+
+Patch: 1702_get_random_bytes_rdrand.patch
+---
+ drivers/char/random.c | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index 0b23b06648484..be60a3b7e6f74 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -1594,16 +1594,29 @@ EXPORT_SYMBOL(del_random_ready_callback);
+ void get_random_bytes_arch(void *buf, int nbytes)
+ {
+ 	char *p = buf;
++#if DEBUG_RANDOM_BOOT > 0
++	if (unlikely(blocking_pool.initialized == 0))
++		printk(KERN_NOTICE "random: %pF get_random_bytes called "
++		       "with %d bits of entropy available\n",
++		       (void *) _RET_IP_,
++		       blocking_pool.entropy_total);
++#endif
++	trace_get_random_bytes(nbytes, _RET_IP_);
++
++	extract_entropy(&blocking_pool, p, nbytes, 0, 0);
+ 
+ 	trace_get_random_bytes_arch(nbytes, _RET_IP_);
+ 	while (nbytes) {
+ 		unsigned long v;
++		unsigned long tmp;
+ 		int chunk = min(nbytes, (int)sizeof(unsigned long));
+ 
+ 		if (!arch_get_random_long(&v))
+ 			break;
+ 		
+-		memcpy(p, &v, chunk);
++		memcpy(&tmp, p, chunk);
++		tmp ^= v;
++		memcpy(p, &tmp, chunk);
+ 		p += chunk;
+ 		nbytes -= chunk;
+ 	}
+-- 
+2.17.0
+

@@ -1,0 +1,2 @@
+To rename 'git format-patch --zero-commit' patches to preserve categorised naming:
+for file in *.patch; do patch="$(sed -n 's/^Patch: \(.*\)/\1/p' "${file}" | head -n 1)"; [ ! -n "${patch}" ] || mv -v "${file}" "${patch}"; done

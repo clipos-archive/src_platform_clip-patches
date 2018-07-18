@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Wed, 11 Jun 2014 18:19:48 +0200
+Subject: [PATCH 08/32] clip: vserver: Add xid/nid to netfilter/iptables owner
+
+CHECK ME: Allow iptables rules to match on vserver xid/nid.
+
+Patch: 1507_vserver-owner-xid.patch
+---
+ include/uapi/linux/netfilter/xt_owner.h |  4 ++++
+ net/netfilter/xt_owner.c                | 10 ++++++++++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/include/uapi/linux/netfilter/xt_owner.h b/include/uapi/linux/netfilter/xt_owner.h
+index 2081761714b56..58bdb7378629b 100644
+--- a/include/uapi/linux/netfilter/xt_owner.h
++++ b/include/uapi/linux/netfilter/xt_owner.h
+@@ -7,12 +7,16 @@ enum {
+ 	XT_OWNER_UID    = 1 << 0,
+ 	XT_OWNER_GID    = 1 << 1,
+ 	XT_OWNER_SOCKET = 1 << 2,
++	XT_OWNER_XID    = 1 << 3,
++	XT_OWNER_NID    = 1 << 4,
+ };
+ 
+ struct xt_owner_match_info {
+ 	__u32 uid_min, uid_max;
+ 	__u32 gid_min, gid_max;
+ 	__u8 match, invert;
++	__u32 nid;
++	__u32 xid;
+ };
+ 
+ #endif /* _XT_OWNER_MATCH_H */
+diff --git a/net/netfilter/xt_owner.c b/net/netfilter/xt_owner.c
+index a20e731b5b6c7..4a7337cf8e46a 100644
+--- a/net/netfilter/xt_owner.c
++++ b/net/netfilter/xt_owner.c
+@@ -97,6 +97,16 @@ owner_mt(const struct sk_buff *skb, struct xt_action_param *par)
+ 			return false;
+ 	}
+ 
++	if (info->match & XT_OWNER_NID)
++		if ((skb->sk->sk_nid != info->nid) ^
++		    !!(info->invert & XT_OWNER_NID))
++			return 0;
++
++	if (info->match & XT_OWNER_XID)
++		if ((skb->sk->sk_xid != info->xid) ^
++		    !!(info->invert & XT_OWNER_XID))
++			return 0;
++
+ 	return true;
+ }
+ 
+-- 
+2.17.0
+

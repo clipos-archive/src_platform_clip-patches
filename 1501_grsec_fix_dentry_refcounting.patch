@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Thibaut Sautereau <clipos@ssi.gouv.fr>
+Date: Wed, 6 Jun 2018 11:38:29 +0200
+Subject: [PATCH 01/32] clip: grsec: dcache: Fix dentry reference counting
+
+Patch: 1501_grsec_fix_dentry_refcounting.patch
+---
+ fs/dcache.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/dcache.c b/fs/dcache.c
+index 80a0f76cc68f8..fcc2ca04d6b52 100644
+--- a/fs/dcache.c
++++ b/fs/dcache.c
+@@ -1023,7 +1023,7 @@ static void shrink_dentry_list(struct list_head *list)
+ 		while (dentry && !lockref_put_or_lock(&dentry->d_lockref)) {
+ 			parent = lock_parent(dentry);
+ 			if (__lockref_read(&dentry->d_lockref) != 1) {
+-				__lockref_inc(&dentry->d_lockref);
++				__lockref_dec(&dentry->d_lockref);
+ 				spin_unlock(&dentry->d_lock);
+ 				if (parent)
+ 					spin_unlock(&parent->d_lock);
+-- 
+2.17.0
+

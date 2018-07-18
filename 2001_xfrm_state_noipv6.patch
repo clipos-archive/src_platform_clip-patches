@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Wed, 22 Apr 2009 14:06:40 +0200
+Subject: [PATCH 30/32] clip: net/xfrm: Fix xfrm_state_init() when IPv6 is not
+ supported
+
+Fix xfrm_state_init() with AF_UNSPEC selectors (for tunnel mode), when
+IPv6 is not supported.
+
+Patch: 2001_xfrm_state_noipv6.patch
+---
+ include/net/xfrm.h    | 4 ++++
+ net/xfrm/xfrm_state.c | 5 +++++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/include/net/xfrm.h b/include/net/xfrm.h
+index 4a102a3beeb95..e6378c75e1155 100644
+--- a/include/net/xfrm.h
++++ b/include/net/xfrm.h
+@@ -456,11 +456,15 @@ static inline int xfrm_af2proto(unsigned int family)
+ 
+ static inline struct xfrm_mode *xfrm_ip2inner_mode(struct xfrm_state *x, int ipproto)
+ {
++#ifdef CONFIG_IPV6
+ 	if ((ipproto == IPPROTO_IPIP && x->props.family == AF_INET) ||
+ 	    (ipproto == IPPROTO_IPV6 && x->props.family == AF_INET6))
+ 		return x->inner_mode;
+ 	else
+ 		return x->inner_mode_iaf;
++#else
++	return x->inner_mode;
++#endif
+ }
+ 
+ struct xfrm_tmpl {
+diff --git a/net/xfrm/xfrm_state.c b/net/xfrm/xfrm_state.c
+index cb5cc3a2dfb7b..186ceef320d7d 100644
+--- a/net/xfrm/xfrm_state.c
++++ b/net/xfrm/xfrm_state.c
+@@ -2079,6 +2079,7 @@ int __xfrm_init_state(struct xfrm_state *x, bool init_replay)
+ 		if (x->props.family == AF_INET)
+ 			iafamily = AF_INET6;
+ 
++#ifdef CONFIG_IPV6
+ 		inner_mode_iaf = xfrm_get_mode(x->props.mode, iafamily);
+ 		if (inner_mode_iaf) {
+ 			if (inner_mode_iaf->flags & XFRM_MODE_FLAG_TUNNEL)
+@@ -2086,6 +2087,10 @@ int __xfrm_init_state(struct xfrm_state *x, bool init_replay)
+ 			else
+ 				xfrm_put_mode(inner_mode_iaf);
+ 		}
++#else
++		inner_mode_iaf = NULL;
++#endif /* CONFIG_IPV6 */
++
+ 	}
+ 
+ 	x->type = xfrm_get_type(x->id.proto, family);
+-- 
+2.17.0
+

@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Micka=C3=ABl=20Sala=C3=BCn?= <clipos@ssi.gouv.fr>
+Date: Thu, 7 Mar 2013 12:06:39 +0100
+Subject: [PATCH 29/32] clip: fs: Set default umask to 0077
+
+There is multiple entry points handling their own umask:
+* the kernel (this patch)
+* PAM
+* clip-lib (e.g. vsctl enter)
+* init scripts
+* shell setup (e.g. /etc/profile)
+
+Patch: 1902_umask_strict.patch
+---
+ fs/fs_struct.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/fs_struct.c b/fs/fs_struct.c
+index fff4211323fcb..38e514b9c71bf 100644
+--- a/fs/fs_struct.c
++++ b/fs/fs_struct.c
+@@ -181,5 +181,5 @@ struct fs_struct init_fs = {
+ 	.users		= ATOMIC_INIT(1),
+ 	.lock		= __SPIN_LOCK_UNLOCKED(init_fs.lock),
+ 	.seq		= SEQCNT_ZERO(init_fs.seq),
+-	.umask		= 0022,
++	.umask		= 0077,
+ };
+-- 
+2.17.0
+

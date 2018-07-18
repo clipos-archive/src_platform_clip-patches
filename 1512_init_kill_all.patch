@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vincent Strubel <clipos@ssi.gouv.fr>
+Date: Mon, 1 Jan 2007 00:00:00 +0200
+Subject: [PATCH 12/32] clip: vserver: Allow init to kill every process on the
+ system
+
+Allows init to kill every process on the system, regardless of vserver
+context boundaries.
+
+When pid 1 is killed the signal is broadcasted to all the processes of
+the machine regardless of their xid.
+
+Patch: 1512_init_kill_all.patch
+---
+ kernel/signal.c | 52 +++++++++++++++++++++++++++++++++++--------------
+ 1 file changed, 37 insertions(+), 15 deletions(-)
+
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 1d95228b7c4dd..5b3ce00c18c07 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -1191,6 +1191,42 @@ int do_send_sig_info(int sig, struct siginfo *info, struct task_struct *p,
+ 	return ret;
+ }
+ 
++
++/* helper */
++static inline int
++_kill_all(int sig, struct siginfo *info)
++{
++	struct task_struct *p;
++	int retval = 0, count = 0;
++
++	read_lock(&tasklist_lock);
++	if (current->pid == 1) {
++		for_each_process(p) {
++			if (p->pid > 1) {
++				int err = group_send_sig_info(sig, info, p);
++				++count;
++				if (err != -EPERM)
++					retval = err;
++			}
++		}
++	} else {
++		for_each_process(p) {
++			if (vx_check(vx_task_xid(p), VS_ADMIN_P|VS_IDENT) &&
++					task_pid_vnr(p) > 1 &&
++					!same_thread_group(p, current) &&
++					!vx_current_initpid(p->pid)) {
++				int err = group_send_sig_info(sig, info, p);
++				++count;
++				if (err != -EPERM)
++					retval = err;
++			}
++		}
++	}
++	read_unlock(&tasklist_lock);
++	return count ? retval : -ESRCH;
++}
++
++
+ /*
+  * Force a signal that the process can't ignore: if necessary
+  * we unblock the signal and change any SIG_IGN to SIG_DFL.
+@@ -1452,21 +1488,7 @@ static int kill_something_info(int sig, struct siginfo *info, pid_t pid)
+ 		ret = __kill_pgrp_info(sig, info,
+ 				pid ? find_vpid(-pid) : task_pgrp(current));
+ 	} else {
+-		int retval = 0, count = 0;
+-		struct task_struct * p;
+-
+-		for_each_process(p) {
+-			if (vx_check(vx_task_xid(p), VS_ADMIN|VS_IDENT) &&
+-				task_pid_vnr(p) > 1 &&
+-				!same_thread_group(p, current) &&
+-				!vx_current_initpid(p->pid)) {
+-				int err = group_send_sig_info(sig, info, p);
+-				++count;
+-				if (err != -EPERM)
+-					retval = err;
+-			}
+-		}
+-		ret = count ? retval : -ESRCH;
++		ret = _kill_all(sig, info);
+ 	}
+ 	read_unlock(&tasklist_lock);
+ 
+-- 
+2.17.0
+
